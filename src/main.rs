@@ -36,15 +36,26 @@ pub fn main() {
 
     let shader_program = render_gl::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
 
-    let triangle_vertices: Vec<f32> = vec![
-        -0.5, -0.5, 0.0, // v1
-        0.5, -0.5, 0.0, // v2
-        0.0, 0.5, 0.0, // v3
+    let vertices: Vec<f32> = vec![
+        0.5, 0.5, 0.0, // top right
+        0.5, -0.5, 0.0, // bottom right
+        -0.5, -0.5, 0.0, // bottom left
+        -0.5, 0.5, 0.0, // top left
+    ];
+
+    let indices: Vec<i32> = vec![
+        0, 1, 3, // triangle 1
+        1, 2, 3, // triangle 2
     ];
 
     let mut vbo: gl::types::GLuint = 0;
     unsafe {
         gl::GenBuffers(1, &mut vbo);
+    }
+
+    let mut ebo: gl::types::GLuint = 0;
+    unsafe {
+        gl::GenBuffers(1, &mut ebo);
     }
 
     let mut vao: gl::types::GLuint = 0;
@@ -57,8 +68,15 @@ pub fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
         gl::BufferData(
             gl::ARRAY_BUFFER,
-            (triangle_vertices.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
-            triangle_vertices.as_ptr() as *const gl::types::GLvoid,
+            (vertices.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
+            vertices.as_ptr() as *const gl::types::GLvoid,
+            gl::STATIC_DRAW,
+        );
+        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
+        gl::BufferData(
+            gl::ELEMENT_ARRAY_BUFFER,
+            (indices.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
+            indices.as_ptr() as *const gl::types::GLvoid,
             gl::STATIC_DRAW,
         );
         gl::EnableVertexAttribArray(0);
@@ -67,10 +85,9 @@ pub fn main() {
             3,
             gl::FLOAT,
             gl::FALSE,
-            (3 * std::mem::size_of::<f32>()) as gl::types::GLint,
+            (3 * std::mem::size_of::<i32>()) as gl::types::GLint,
             std::ptr::null(),
         );
-        gl::BindBuffer(gl::ARRAY_BUFFER, 0);
         gl::BindVertexArray(0);
     }
 
@@ -96,7 +113,8 @@ pub fn main() {
 
         unsafe {
             gl::BindVertexArray(vao);
-            gl::DrawArrays(gl::TRIANGLES, 0, 3);
+            gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, std::ptr::null());
+            gl::BindVertexArray(0);
         }
 
         window.gl_swap_window();
