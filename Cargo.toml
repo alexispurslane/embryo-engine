@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 gl = "0.10.0"
+project_gilgamesh_render_gl_derive = { path = "render_gl_derive" }
 
 [dependencies.sdl2]
 version = "0.35"
 default-features = false
 features = ["ttf", "image", "gfx", "mixer", "use-pkgconfig", "static-link"]
-

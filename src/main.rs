@@ -1,11 +1,15 @@
 extern crate gl;
 extern crate sdl2;
+#[macro_use]
+extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 
 use sdl2::event::Event;
 use std::ffi::CString;
 
+mod render_gl;
 mod utils;
-use utils::*;
+use render_gl::data::{Cvec3, OpaqueColorVertex, Vertex};
+use render_gl::shaders;
 
 pub fn main() {
     let sdl_context = sdl2::init().unwrap();
@@ -34,62 +38,28 @@ pub fn main() {
         shaders::Shader::from_frag_source(&CString::new(include_str!("triangle.frag")).unwrap())
             .unwrap();
 
-    let shader_program = render_gl::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
+    let shader_program = shaders::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
 
-    let vertices: Vec<f32> = vec![
-        0.5, 0.5, 0.0, // top right
-        0.5, -0.5, 0.0, // bottom right
-        -0.5, -0.5, 0.0, // bottom left
-        -0.5, 0.5, 0.0, // top left
-    ];
+    let vbo = shaders::VertexBufferObject::new_with_vec(
+        gl::ARRAY_BUFFER,
+        vec![
+            OpaqueColorVertex {
+                pos: (0.5, -0.5, 0.0).into(),
+                clr: (1.0, 0.0, 0.0).into(),
+            },
+            OpaqueColorVertex {
+                pos: (-0.5, -0.5, 0.0).into(),
+                clr: (0.0, 1.0, 0.0).into(),
+            },
+            OpaqueColorVertex {
+                pos: (-0.0, 0.5, 0.0).into(),
+                clr: (0.0, 0.0, 1.0).into(),
+            },
+        ],
+    );
 
-    let indices: Vec<i32> = vec![
-        0, 1, 3, // triangle 1
-        1, 2, 3, // triangle 2
-    ];
-
-    let mut vbo: gl::types::GLuint = 0;
-    unsafe {
-        gl::GenBuffers(1, &mut vbo);
-    }
-
-    let mut ebo: gl::types::GLuint = 0;
-    unsafe {
-        gl::GenBuffers(1, &mut ebo);
-    }
-
-    let mut vao: gl::types::GLuint = 0;
-    unsafe {
-        gl::GenVertexArrays(1, &mut vao);
-    }
-
-    unsafe {
-        gl::BindVertexArray(vao);
-        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-        gl::BufferData(
-            gl::ARRAY_BUFFER,
-            (vertices.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
-            vertices.as_ptr() as *const gl::types::GLvoid,
-            gl::STATIC_DRAW,
-        );
-        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
-        gl::BufferData(
-            gl::ELEMENT_ARRAY_BUFFER,
-            (indices.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
-            indices.as_ptr() as *const gl::types::GLvoid,
-            gl::STATIC_DRAW,
-        );
-        gl::EnableVertexAttribArray(0);
-        gl::VertexAttribPointer(
-            0,
-            3,
-            gl::FLOAT,
-            gl::FALSE,
-            (3 * std::mem::size_of::<i32>()) as gl::types::GLint,
-            std::ptr::null(),
-        );
-        gl::BindVertexArray(0);
-    }
+    let vao = shaders::VertexArrayObject::new(vbo);
+    vao.setup_vertex_attrib_pointers();
 
     unsafe {
         gl::Viewport(0, 0, 1024, 768);
@@ -111,11 +81,7 @@ pub fn main() {
 
         shader_program.set_used();
 
-        unsafe {
-            gl::BindVertexArray(vao);
-            gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, std::ptr::null());
-            gl::BindVertexArray(0);
-        }
+        vao.draw_arrays(gl::TRIANGLES, 0, 3);
 
         window.gl_swap_window();
     }
