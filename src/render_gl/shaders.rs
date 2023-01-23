@@ -1,5 +1,7 @@
 use crate::utils::*;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
+
+use super::data::{Cvec3, Cvec4};
 
 pub struct Shader {
     pub id: gl::types::GLuint,
@@ -39,12 +41,12 @@ impl Shader {
         Ok(Shader { id })
     }
 
-    pub fn from_vert_source(source: &CStr) -> Result<Shader, String> {
-        Shader::from_source(source, gl::VERTEX_SHADER)
-    }
-
-    pub fn from_frag_source(source: &CStr) -> Result<Shader, String> {
-        Shader::from_source(source, gl::FRAGMENT_SHADER)
+    pub fn from_file(path: &'static str, shader_type: gl::types::GLuint) -> Result<Shader, String> {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|_| format!("Couldn't locate shader source at {:?}", path))?;
+        let source =
+            CString::new(contents).map_err(|_| "Couldn't convert shader source to C string")?;
+        Self::from_source(&source, shader_type)
     }
 }
 
@@ -79,8 +81,8 @@ impl Program {
             gl::GetProgramiv(program_id, gl::LINK_STATUS, &mut success);
         }
 
+        let mut len: gl::types::GLint = 0;
         if success == 0 {
-            let mut len: gl::types::GLint = 0;
             unsafe {
                 gl::GetProgramiv(program_id, gl::INFO_LOG_LENGTH, &mut len);
             }
@@ -111,6 +113,102 @@ impl Program {
             gl::UseProgram(self.id);
         }
     }
+
+    pub fn set_uniform_1b(&self, name: &CStr, b: bool) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform1i(loc, b as gl::types::GLint);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_1i(&self, name: &CStr, x: i32) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform1i(loc, x as gl::types::GLint);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_1f(&self, name: &CStr, x: f32) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform1f(loc, x as gl::types::GLfloat);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_3f(&self, name: &CStr, x: f32, y: f32, z: f32) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform3f(loc, x, y, z);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_4f(&self, name: &CStr, x: f32, y: f32, z: f32, w: f32) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform4f(loc, x, y, z, w);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_1fv(&self, name: &CStr, fv: &[f32]) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform1fv(loc, fv.len() as gl::types::GLsizei, fv.as_ptr());
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_3fv(&self, name: &CStr, fv: &[Cvec3]) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform3fv(
+                    loc,
+                    fv.len() as gl::types::GLsizei,
+                    fv.as_ptr() as *const gl::types::GLfloat,
+                );
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_4fv(&self, name: &CStr, fv: &[Cvec4]) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::Uniform4fv(
+                    loc,
+                    fv.len() as gl::types::GLsizei,
+                    fv.as_ptr() as *const gl::types::GLfloat,
+                );
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
 }
 
 impl Drop for Program {
@@ -119,11 +217,6 @@ impl Drop for Program {
             gl::DeleteProgram(self.id);
         }
     }
-}
-
-pub trait BindableObject {
-    fn bind(&self);
-    fn unbind(&self);
 }
 
 pub struct VertexBufferObject<T: super::data::Vertex> {
@@ -166,20 +259,16 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     }
 
     pub fn setup_vertex_attrib_pointers(&self) {
-        self.bind();
         T::setup_vertex_attrib_pointers();
-        self.unbind();
     }
-}
 
-impl<T: super::data::Vertex> BindableObject for VertexBufferObject<T> {
-    fn bind(&self) {
+    pub fn bind(&self) {
         unsafe {
             gl::BindBuffer(self.buffer_type, self.id);
         }
     }
 
-    fn unbind(&self) {
+    pub fn unbind(&self) {
         unsafe {
             gl::BindBuffer(self.buffer_type, 0);
         }
@@ -194,21 +283,17 @@ impl<T: super::data::Vertex> Drop for VertexBufferObject<T> {
     }
 }
 
-pub struct VertexArrayObject<T: super::data::Vertex> {
+pub struct VertexArrayObject {
     pub id: gl::types::GLuint,
-    pub array_buffer: VertexBufferObject<T>,
 }
 
-impl<T: super::data::Vertex> VertexArrayObject<T> {
-    pub fn new(vbo: VertexBufferObject<T>) -> Self {
+impl VertexArrayObject {
+    pub fn new() -> Self {
         let mut vao: gl::types::GLuint = 0;
         unsafe {
             gl::GenVertexArrays(1, &mut vao);
         }
-        VertexArrayObject {
-            id: vao,
-            array_buffer: vbo,
-        }
+        VertexArrayObject { id: vao }
     }
 
     pub fn draw_arrays(
@@ -217,30 +302,28 @@ impl<T: super::data::Vertex> VertexArrayObject<T> {
         first: gl::types::GLint,
         count: gl::types::GLsizei,
     ) {
-        self.bind();
         unsafe {
             gl::DrawArrays(mode, first, count);
         }
-        self.unbind();
     }
 
-    pub fn setup_vertex_attrib_pointers(&self) {
-        self.bind();
-        self.array_buffer.setup_vertex_attrib_pointers();
-        self.unbind();
-    }
-}
-
-impl<T: super::data::Vertex> BindableObject for VertexArrayObject<T> {
-    fn bind(&self) {
+    pub fn bind(&self) {
         unsafe {
             gl::BindVertexArray(self.id);
         }
     }
 
-    fn unbind(&self) {
+    pub fn unbind(&self) {
         unsafe {
             gl::BindVertexArray(0);
+        }
+    }
+}
+
+impl Drop for VertexArrayObject {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteVertexArrays(1, &mut self.id);
         }
     }
 }
