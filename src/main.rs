@@ -81,13 +81,19 @@ pub fn main() {
     vbo.setup_vertex_attrib_pointers();
     vao.unbind();
 
-    let (width, height, pixels) = {
-        let tex =
-            image::open("container.jpg").expect("Cannnot open texture 'container.jpg' for read");
-        (tex.width(), tex.height(), tex.into_rgb8().into_vec())
-    };
+    let (width, height, pixels) = utils::load_image_u8("container.jpg");
 
-    let texture = textures::Texture::new_with_bytes(
+    let texture1 = textures::Texture::new_with_bytes(
+        gl::TEXTURE_2D,
+        textures::TextureParameters::default(),
+        &pixels,
+        width,
+        height,
+    );
+
+    let (width, height, pixels) = utils::load_image_u8("awesomeface.png");
+
+    let texture2 = textures::Texture::new_with_bytes(
         gl::TEXTURE_2D,
         textures::TextureParameters::default(),
         &pixels,
@@ -114,11 +120,13 @@ pub fn main() {
         }
 
         shader_program.set_used();
+        shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 0);
+        shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 1);
 
         vao.bind();
-        texture.bind();
+        texture1.bind_to_texture_unit(gl::TEXTURE0);
+        texture2.bind_to_texture_unit(gl::TEXTURE1);
         vao.draw_elements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0);
-        texture.unbind();
         vao.unbind();
 
         window.gl_swap_window();

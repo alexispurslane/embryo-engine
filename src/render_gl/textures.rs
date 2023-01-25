@@ -97,6 +97,13 @@ impl<T: ColorDepth> Texture<T> {
         }
     }
 
+    pub fn bind_to_texture_unit(&self, tex_unit: gl::types::GLenum) {
+        unsafe {
+            gl::ActiveTexture(tex_unit);
+        }
+        self.bind();
+    }
+
     pub fn bind(&self) {
         unsafe {
             gl::BindTexture(self.ty, self.id);
