@@ -1,15 +1,17 @@
 extern crate gl;
+extern crate image;
 extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 
+use render_gl::textures;
 use sdl2::event::Event;
 use std::ffi::CString;
 
 mod render_gl;
 mod utils;
-use render_gl::data::OpaqueColorVertex;
-use render_gl::shaders;
+use render_gl::data::VertexRGBTex;
+use render_gl::{objects, shaders};
 
 pub fn main() {
     let sdl_context = sdl2::init().unwrap();
@@ -44,37 +46,60 @@ pub fn main() {
 
     let shader_program = shaders::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
 
-    let vbo = shaders::VertexBufferObject::new_with_vec(
+    let vbo = objects::VertexBufferObject::new_with_vec(
         gl::ARRAY_BUFFER,
         vec![
-            OpaqueColorVertex {
-                pos: (0.5, -0.5, 0.0).into(),
+            VertexRGBTex {
+                pos: (0.5, 0.5, 0.0).into(),
                 clr: (1.0, 0.0, 0.0).into(),
+                tex: (1.0, 1.0).into(),
             },
-            OpaqueColorVertex {
-                pos: (-0.5, -0.5, 0.0).into(),
+            VertexRGBTex {
+                pos: (0.5, -0.5, 0.0).into(),
                 clr: (0.0, 1.0, 0.0).into(),
+                tex: (1.0, 0.0).into(),
             },
-            OpaqueColorVertex {
-                pos: (-0.0, 0.5, 0.0).into(),
+            VertexRGBTex {
+                pos: (-0.5, -0.5, 0.0).into(),
                 clr: (0.0, 0.0, 1.0).into(),
+                tex: (0.0, 0.0).into(),
+            },
+            VertexRGBTex {
+                pos: (-0.5, 0.5, 0.0).into(),
+                clr: (1.0, 1.0, 0.0).into(),
+                tex: (0.0, 1.0).into(),
             },
         ],
     );
 
-    let vao = shaders::VertexArrayObject::new();
+    let ebo = objects::ElementBufferObject::new_with_vec(vec![0, 1, 3, 1, 2, 3]);
+
+    let vao = objects::VertexArrayObject::new();
     vao.bind();
     vbo.bind();
+    ebo.bind();
     vbo.setup_vertex_attrib_pointers();
-    vbo.unbind();
     vao.unbind();
+
+    let (width, height, pixels) = {
+        let tex =
+            image::open("container.jpg").expect("Cannnot open texture 'container.jpg' for read");
+        (tex.width(), tex.height(), tex.into_rgb8().into_vec())
+    };
+
+    let texture = textures::Texture::new_with_bytes(
+        gl::TEXTURE_2D,
+        textures::TextureParameters::default(),
+        &pixels,
+        width,
+        height,
+    );
 
     unsafe {
         gl::Viewport(0, 0, 1024, 768);
         gl::ClearColor(0.3, 0.3, 0.5, 1.0);
     }
 
-    let start_time = std::time::Instant::now();
     let mut event_pump = sdl_context.event_pump().unwrap();
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -89,15 +114,11 @@ pub fn main() {
         }
 
         shader_program.set_used();
-        shader_program.set_uniform_3f(
-            &CString::new("GlobalColor").unwrap(),
-            start_time.elapsed().as_secs_f32().sin(),
-            0.0,
-            start_time.elapsed().as_secs_f32().sin(),
-        );
 
         vao.bind();
-        vao.draw_arrays(gl::TRIANGLES, 0, 3);
+        texture.bind();
+        vao.draw_elements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0);
+        texture.unbind();
         vao.unbind();
 
         window.gl_swap_window();

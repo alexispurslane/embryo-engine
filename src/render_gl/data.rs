@@ -1,5 +1,37 @@
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
+pub struct Cvec2 {
+    pub d0: f32,
+    pub d1: f32,
+}
+
+impl Cvec2 {
+    pub fn new(d0: f32, d1: f32) -> Cvec2 {
+        Cvec2 { d0, d1 }
+    }
+
+    /// Enable and set the values for the one vertex attribute this vector represents
+    unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
+        gl::EnableVertexAttribArray(location as gl::types::GLuint);
+        gl::VertexAttribPointer(
+            location as gl::types::GLuint,
+            2,
+            gl::FLOAT,
+            gl::FALSE,
+            stride as gl::types::GLint,
+            offset as *const gl::types::GLvoid,
+        );
+    }
+}
+
+impl From<(f32, f32)> for Cvec2 {
+    fn from(other: (f32, f32)) -> Self {
+        Cvec2::new(other.0, other.1)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed)]
 pub struct Cvec3 {
     pub d0: f32,
     pub d1: f32,
@@ -71,9 +103,20 @@ pub trait Vertex {
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]
 #[repr(C, packed)]
-pub struct OpaqueColorVertex {
+pub struct VertexRGB {
     #[location = 0]
     pub pos: Cvec3,
     #[location = 1]
     pub clr: Cvec3,
+}
+
+#[derive(VertexAttribPointers, Copy, Clone, Debug)]
+#[repr(C, packed)]
+pub struct VertexRGBTex {
+    #[location = 0]
+    pub pos: Cvec3,
+    #[location = 1]
+    pub clr: Cvec3,
+    #[location = 2]
+    pub tex: Cvec2,
 }
