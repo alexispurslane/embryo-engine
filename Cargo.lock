@@ -214,6 +214,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12f597d56c1bd55a811a1be189459e8fad2bbc272616375602443bdfb37fa774"
+
+[[package]]
 name = "half"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -436,6 +442,7 @@ name = "project-gilgamesh"
 version = "0.1.0"
 dependencies = [
  "gl",
+ "glam",
  "image",
  "project_gilgamesh_render_gl_derive",
  "sdl2",

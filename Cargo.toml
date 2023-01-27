@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 gl = "0.10.0"
 image = "0.24.5"
+glam = "0.22.0"
 project_gilgamesh_render_gl_derive = { path = "render_gl_derive" }
 
 [dependencies.sdl2]

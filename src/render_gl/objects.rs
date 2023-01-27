@@ -1,6 +1,17 @@
+use std::collections::HashMap;
+
 pub struct VertexBufferObject<T: super::data::Vertex> {
+    /// The internal buffer object ID OpenGL uses to bind/unbind the object.
     pub id: gl::types::GLuint,
+    /// The type of buffer this is (gl::ARRAY_BUFFER)
     pub buffer_type: gl::types::GLenum,
+    /// Stores the offset of each instance by name so that rewriting
+    /// per-instance data is easy.
+    pub instances: HashMap<String, gl::types::GLsizeiptr>,
+    /// Stores the last offset so adding more instances is easy
+    pub last_offset: gl::types::GLsizeiptr,
+    /// The per-vertex data is a homogenous format that shoudln't change for one
+    /// buffer, so we store this statically. Per-instance data is dynamic.
     marker: std::marker::PhantomData<T>,
 }
 
@@ -14,29 +25,81 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
         VertexBufferObject {
             id: vbo,
             buffer_type: bt,
+            last_offset: 0,
+            instances: HashMap::new(),
             marker: std::marker::PhantomData,
         }
     }
 
     pub fn new_with_vec(bt: gl::types::GLenum, vs: Vec<T>) -> Self {
-        let vbo = Self::new(bt);
+        let mut vbo = Self::new(bt);
         vbo.bind();
         vbo.upload_static_draw_data(vs);
         vbo.unbind();
         vbo
     }
 
-    pub fn upload_static_draw_data(&self, vs: Vec<T>) {
+    /// Provides a way to write in *per-instance data* (in blocks,
+    /// non-interleaved) separately from (interleaved) *per-vertex*, which data
+    /// has a different type. **Each set of instance data is given a name so you
+    /// can easily rewrite it with the next call**
+    pub fn add_instance_data<I: super::data::VertexAttribute>(
+        &mut self,
+        instance_name: String,
+        location: gl::types::GLuint,
+        divisor: gl::types::GLuint,
+        vs: Vec<I>,
+    ) {
+        let buf_size = (vs.len() * std::mem::size_of::<I>()) as gl::types::GLsizeiptr;
+        if let Some(offset) = self.instances.get(&instance_name) {
+            // Overwriting existing instance data
+            unsafe {
+                gl::BufferSubData(
+                    self.buffer_type,
+                    *offset,
+                    buf_size,
+                    vs.as_ptr() as *const gl::types::GLvoid,
+                );
+            }
+        } else {
+            // New instance data block tacked onto end
+            println!("New instance specific data '{:?}' added:", instance_name);
+            println!("  OFFSET: {:?}", self.last_offset);
+            println!("  SIZE: {:?}", buf_size);
+            println!("  LOC: {:?}", location);
+            println!("  DIV: {:?}", divisor);
+            unsafe {
+                gl::BufferSubData(
+                    self.buffer_type,
+                    self.last_offset,
+                    buf_size,
+                    vs.as_ptr() as *const gl::types::GLvoid,
+                );
+                I::vertex_attrib_pointer(0, location as usize, self.last_offset as usize);
+                gl::VertexAttribDivisor(location, divisor);
+            }
+            self.instances.insert(instance_name, self.last_offset);
+            self.last_offset += buf_size;
+        }
+    }
+
+    /// Writes in new per-vertex data, resets per-instance data.
+    pub fn upload_static_draw_data(&mut self, vs: Vec<T>) {
+        self.last_offset = 0;
+        self.instances = HashMap::new();
+        let buf_size = (vs.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
         unsafe {
             gl::BufferData(
-                gl::ARRAY_BUFFER,
-                (vs.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr,
+                self.buffer_type,
+                buf_size,
                 vs.as_ptr() as *const gl::types::GLvoid,
                 gl::STATIC_DRAW,
             );
         }
+        self.last_offset += buf_size;
     }
 
+    /// Set up per-vertex vertex attribute pointers (interleaved)
     pub fn setup_vertex_attrib_pointers(&self) {
         T::setup_vertex_attrib_pointers();
     }
@@ -95,6 +158,25 @@ impl VertexArrayObject {
     ) {
         unsafe {
             gl::DrawElements(mode, count, ty, offset as *const gl::types::GLvoid);
+        }
+    }
+
+    pub fn draw_elements_instanced(
+        &self,
+        mode: gl::types::GLenum,
+        count: gl::types::GLint,
+        ty: gl::types::GLenum,
+        offset: gl::types::GLint,
+        num_instances: gl::types::GLint,
+    ) {
+        unsafe {
+            gl::DrawElementsInstanced(
+                mode,
+                count,
+                ty,
+                offset as *const gl::types::GLvoid,
+                num_instances,
+            );
         }
     }
 

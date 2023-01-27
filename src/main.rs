@@ -1,4 +1,5 @@
 extern crate gl;
+extern crate glam;
 extern crate image;
 extern crate sdl2;
 #[macro_use]
@@ -10,7 +11,7 @@ use std::ffi::CString;
 
 mod render_gl;
 mod utils;
-use render_gl::data::VertexRGBTex;
+use render_gl::data::{Cvec4, VertexRGBTex};
 use render_gl::{objects, shaders};
 
 pub fn main() {
@@ -46,7 +47,7 @@ pub fn main() {
 
     let shader_program = shaders::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
 
-    let vbo = objects::VertexBufferObject::new_with_vec(
+    let mut vbo = objects::VertexBufferObject::new_with_vec(
         gl::ARRAY_BUFFER,
         vec![
             VertexRGBTex {
@@ -106,6 +107,7 @@ pub fn main() {
         gl::ClearColor(0.3, 0.3, 0.5, 1.0);
     }
 
+    let start_time = std::time::Instant::now();
     let mut event_pump = sdl_context.event_pump().unwrap();
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -122,6 +124,16 @@ pub fn main() {
         shader_program.set_used();
         shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 0);
         shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 1);
+
+        let mut trans = glam::Mat4::IDENTITY;
+        trans *= glam::Mat4::from_rotation_z(
+            (start_time.elapsed().as_millis() as f32 / 100.0).to_radians(),
+        );
+        let scalef = (start_time.elapsed().as_millis() as f32 / 300.0).sin() + 1.2;
+        trans *= glam::Mat4::from_scale(glam::vec3(scalef, scalef, scalef));
+
+        shader_program
+            .set_uniform_matrix_4fv(&CString::new("mvp").unwrap(), &trans.to_cols_array());
 
         vao.bind();
         texture1.bind_to_texture_unit(gl::TEXTURE0);

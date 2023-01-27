@@ -209,6 +209,17 @@ impl Program {
             }
         }
     }
+
+    pub fn set_uniform_matrix_4fv(&self, name: &CStr, fv: &[f32; 16]) {
+        unsafe {
+            let loc = gl::GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                gl::UniformMatrix4fv(loc, 1, gl::FALSE, fv.as_ptr() as *const gl::types::GLfloat);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
 }
 
 impl Drop for Program {

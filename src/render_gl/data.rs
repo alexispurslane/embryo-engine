@@ -1,3 +1,9 @@
+pub trait VertexAttribute {
+    /// Initialize a vertex attribute containing this type at this location,
+    /// with this stride and offset.
+    unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize);
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct Cvec2 {
@@ -9,7 +15,9 @@ impl Cvec2 {
     pub fn new(d0: f32, d1: f32) -> Cvec2 {
         Cvec2 { d0, d1 }
     }
+}
 
+impl VertexAttribute for Cvec2 {
     /// Enable and set the values for the one vertex attribute this vector represents
     unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
         gl::EnableVertexAttribArray(location as gl::types::GLuint);
@@ -42,7 +50,9 @@ impl Cvec3 {
     pub fn new(d0: f32, d1: f32, d2: f32) -> Cvec3 {
         Cvec3 { d0, d1, d2 }
     }
+}
 
+impl VertexAttribute for Cvec3 {
     /// Enable and set the values for the one vertex attribute this vector represents
     unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
         gl::EnableVertexAttribArray(location as gl::types::GLuint);
@@ -76,7 +86,9 @@ impl Cvec4 {
     pub fn new(d0: f32, d1: f32, d2: f32, d3: f32) -> Self {
         Cvec4 { d0, d1, d2, d3 }
     }
+}
 
+impl VertexAttribute for Cvec4 {
     /// Enable and set the values for the one vertex attribute this vector represents
     unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
         gl::EnableVertexAttribArray(location as gl::types::GLuint);
