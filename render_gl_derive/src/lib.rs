@@ -5,7 +5,7 @@ extern crate syn;
 #[macro_use]
 extern crate quote;
 
-#[proc_macro_derive(VertexAttribPointers, attributes(location))]
+#[proc_macro_derive(VertexAttribPointers, attributes(location, divisor))]
 pub fn vertex_attrib_pointers_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = syn::parse(input).unwrap();
     generate_impl(&ast)
@@ -57,7 +57,7 @@ fn generate_vertex_attrib_pointer_call(field: &syn::Field) -> proc_macro2::Token
     let location = field
         .attrs
         .iter()
-        .filter_map(|a: &syn::Attribute| match a.parse_meta() {
+        .find_map(|a: &syn::Attribute| match a.parse_meta() {
             Ok(syn::Meta::NameValue(syn::MetaNameValue {
                 path,
                 eq_token: _,
@@ -71,13 +71,31 @@ fn generate_vertex_attrib_pointer_call(field: &syn::Field) -> proc_macro2::Token
             }
             _ => None,
         })
-        .next()
         .unwrap_or_else(|| panic!("Field {:?} is missing #[location = ?] attribute", name));
+    let divisor = field
+        .attrs
+        .iter()
+        .find_map(|a: &syn::Attribute| match a.parse_meta() {
+            Ok(syn::Meta::NameValue(syn::MetaNameValue {
+                path,
+                eq_token: _,
+                lit: syn::Lit::Int(ref lit),
+            })) => {
+                if path.is_ident("divisor") {
+                    lit.base10_parse::<usize>().ok()
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .unwrap_or(0);
     let field_type = &field.ty;
     quote! {
         let location = #location;
         unsafe {
             #field_type::vertex_attrib_pointer(stride, location, offset);
+            gl::VertexAttribDivisor(location as gl::types::GLuint, #divisor as gl::types::GLuint);
         }
         let offset = offset + std::mem::size_of::<#field_type>();
     }

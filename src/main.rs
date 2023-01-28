@@ -11,7 +11,7 @@ use std::ffi::CString;
 
 mod render_gl;
 mod utils;
-use render_gl::data::{Cvec4, VertexRGBTex};
+use render_gl::data::{InstanceLocationVertex, VertexRGBTex};
 use render_gl::{objects, shaders};
 
 pub fn main() {
@@ -47,7 +47,7 @@ pub fn main() {
 
     let shader_program = shaders::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
 
-    let mut vbo = objects::VertexBufferObject::new_with_vec(
+    let vbo = objects::VertexBufferObject::new_with_vec(
         gl::ARRAY_BUFFER,
         vec![
             VertexRGBTex {
@@ -72,6 +72,20 @@ pub fn main() {
             },
         ],
     );
+    let ibo = objects::VertexBufferObject::new_with_vec(
+        gl::ARRAY_BUFFER,
+        (0..100)
+            .map(|i| InstanceLocationVertex {
+                pos: (
+                    (2.0 / 10.0) * (i as f32 % 10.0) - 1.0,
+                    (2.0 / 10.0) * (i as f32 / 10.0) - 1.0,
+                    0.0,
+                    0.0,
+                )
+                    .into(),
+            })
+            .collect(),
+    );
 
     let ebo = objects::ElementBufferObject::new_with_vec(vec![0, 1, 3, 1, 2, 3]);
 
@@ -80,6 +94,9 @@ pub fn main() {
     vbo.bind();
     ebo.bind();
     vbo.setup_vertex_attrib_pointers();
+    ibo.bind();
+    ibo.setup_vertex_attrib_pointers();
+    vbo.bind();
     vao.unbind();
 
     let (width, height, pixels) = utils::load_image_u8("container.jpg");
@@ -125,20 +142,19 @@ pub fn main() {
         shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 0);
         shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 1);
 
+        vao.bind();
+        texture1.bind_to_texture_unit(gl::TEXTURE0);
+        texture2.bind_to_texture_unit(gl::TEXTURE1);
+        let time = start_time.elapsed().as_millis();
         let mut trans = glam::Mat4::IDENTITY;
-        trans *= glam::Mat4::from_rotation_z(
-            (start_time.elapsed().as_millis() as f32 / 100.0).to_radians(),
-        );
-        let scalef = (start_time.elapsed().as_millis() as f32 / 300.0).sin() + 1.2;
+        trans *= glam::Mat4::from_rotation_z((time as f32 / 100.0).to_radians());
+        let scalef = ((time as f32 / 300.0).sin() + 1.1) * 0.3;
         trans *= glam::Mat4::from_scale(glam::vec3(scalef, scalef, scalef));
 
         shader_program
             .set_uniform_matrix_4fv(&CString::new("mvp").unwrap(), &trans.to_cols_array());
 
-        vao.bind();
-        texture1.bind_to_texture_unit(gl::TEXTURE0);
-        texture2.bind_to_texture_unit(gl::TEXTURE1);
-        vao.draw_elements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0);
+        vao.draw_elements_instanced(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0, 100);
         vao.unbind();
 
         window.gl_swap_window();

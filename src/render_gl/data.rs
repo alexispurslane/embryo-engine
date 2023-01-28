@@ -115,6 +115,14 @@ pub trait Vertex {
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]
 #[repr(C, packed)]
+pub struct InstanceLocationVertex {
+    #[location = 3]
+    #[divisor = 1]
+    pub pos: Cvec4,
+}
+
+#[derive(VertexAttribPointers, Copy, Clone, Debug)]
+#[repr(C, packed)]
 pub struct VertexRGB {
     #[location = 0]
     pub pos: Cvec3,

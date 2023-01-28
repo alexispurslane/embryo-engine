@@ -1,6 +1,4 @@
-use std::{ffi::CString, path::Path};
-
-use crate::render_gl::textures::ColorDepth;
+use std::ffi::CString;
 
 pub fn create_whitespace_cstring(len: usize) -> CString {
     let mut buffer: Vec<u8> = Vec::with_capacity(len + 1);
