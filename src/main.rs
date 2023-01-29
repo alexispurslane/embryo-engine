@@ -40,6 +40,8 @@ pub fn main() {
         .build()
         .unwrap();
 
+    sdl_context.mouse().set_relative_mouse_mode(true);
+
     let _gl_context = window.gl_create_context().unwrap();
     let _gl =
         gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void);
@@ -68,9 +70,9 @@ pub fn main() {
     let instance_model_matrices: Vec<InstanceTransformVertex> = (0..NUM_INSTANCES)
         .map(|_| {
             let model = glam::Mat4::from_translation(glam::vec3(
-                rng.gen_range::<f32, _>(-10.0..10.0),
-                rng.gen_range::<f32, _>(-10.0..10.0),
-                rng.gen_range::<f32, _>(-10.0..10.0),
+                rng.gen_range::<f32, _>(-5.0..5.0),
+                rng.gen_range::<f32, _>(-5.0..5.0),
+                rng.gen_range::<f32, _>(-5.0..5.0),
             ));
             InstanceTransformVertex::new(model.to_cols_array())
         })
@@ -132,12 +134,6 @@ pub fn main() {
     let mut last_time = start_time.elapsed().as_millis();
     let mut dt;
 
-    let mut mouse = events::Mouse {
-        is_initial_move: true,
-        last_x: 1024 / 2,
-        last_y: 768 / 2,
-    };
-
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut stdout = stdout();
     while scene.running {
@@ -157,8 +153,7 @@ pub fn main() {
         ));
         scene.queue_commands(events::handle_mouse(
             &scene,
-            &mut mouse,
-            &event_pump.mouse_state(),
+            &event_pump.relative_mouse_state(),
         ));
 
         scene.update(dt);

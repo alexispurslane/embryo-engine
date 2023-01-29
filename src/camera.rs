@@ -58,8 +58,8 @@ impl Camera for FlyingCamera {
 
     fn rotate(&mut self, rot: PitchYawRoll) {
         let PitchYawRoll { pitch, yaw, .. } = rot;
+        self.rotation.yaw = (self.rotation.yaw + yaw) % 360.0;
         self.rotation.pitch = (self.rotation.pitch + pitch).clamp(-89.0, 89.0);
-        self.rotation.yaw += yaw;
         self.front = glam::vec3(
             self.rotation.yaw.to_radians().cos() * self.rotation.pitch.to_radians().cos(),
             self.rotation.pitch.to_radians().sin(),

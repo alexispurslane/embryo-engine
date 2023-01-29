@@ -3,6 +3,7 @@ use sdl2::event::Event;
 use sdl2::event::EventPollIterator;
 use sdl2::keyboard::{KeyboardState, Scancode};
 use sdl2::mouse::MouseState;
+use sdl2::mouse::RelativeMouseState;
 
 use crate::camera::PitchYawRoll;
 
@@ -28,26 +29,10 @@ pub fn handle_keyboard(
 
 const MOUSE_SENSITIVITY: f32 = 0.1;
 
-pub struct Mouse {
-    pub last_x: i32,
-    pub last_y: i32,
-    pub is_initial_move: bool,
-}
-
-pub fn handle_mouse(_scene: &Scene, mo: &mut Mouse, mouse_state: &MouseState) -> Vec<SceneCommand> {
-    let (x, y) = (mouse_state.x(), mouse_state.y());
-    if mo.is_initial_move {
-        mo.last_x = x;
-        mo.last_y = y;
-        mo.is_initial_move = false;
-    }
-    let (xoffset, yoffset) = (x - mo.last_x, mo.last_y - y);
-    mo.last_x = x;
-    mo.last_y = y;
-
-    let xo = xoffset as f32 * MOUSE_SENSITIVITY;
-    let yo = yoffset as f32 * MOUSE_SENSITIVITY;
-    vec![SceneCommand::RotateCamera(PitchYawRoll::new(yo, xo, 0.0))]
+pub fn handle_mouse(_scene: &Scene, mouse_state: &RelativeMouseState) -> Vec<SceneCommand> {
+    let yo = mouse_state.y() as f32 * MOUSE_SENSITIVITY;
+    let xo = mouse_state.x() as f32 * MOUSE_SENSITIVITY;
+    vec![SceneCommand::RotateCamera(PitchYawRoll::new(-yo, xo, 0.0))]
 }
 
 pub fn handle_window_events(_scene: &Scene, events: EventPollIterator) -> Vec<SceneCommand> {
