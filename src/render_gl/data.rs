@@ -108,6 +108,11 @@ impl From<(f32, f32, f32, f32)> for Cvec4 {
         Cvec4::new(other.0, other.1, other.2, other.3)
     }
 }
+impl From<&[f32]> for Cvec4 {
+    fn from(other: &[f32]) -> Self {
+        Cvec4::new(other[0], other[1], other[2], other[3])
+    }
+}
 
 pub trait Vertex {
     fn setup_vertex_attrib_pointers();
@@ -119,6 +124,34 @@ pub struct InstanceLocationVertex {
     #[location = 3]
     #[divisor = 1]
     pub pos: Cvec4,
+}
+
+#[derive(VertexAttribPointers, Copy, Clone, Debug)]
+#[repr(C, packed)]
+pub struct InstanceTransformVertex {
+    #[location = 3]
+    #[divisor = 1]
+    pub d0: Cvec4,
+    #[location = 4]
+    #[divisor = 1]
+    pub d1: Cvec4,
+    #[location = 5]
+    #[divisor = 1]
+    pub d2: Cvec4,
+    #[location = 6]
+    #[divisor = 1]
+    pub d3: Cvec4,
+}
+
+impl InstanceTransformVertex {
+    pub fn new(values: [f32; 16]) -> Self {
+        Self {
+            d0: values[0..=3].into(),
+            d1: values[4..=7].into(),
+            d2: values[8..=11].into(),
+            d3: values[12..=15].into(),
+        }
+    }
 }
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]

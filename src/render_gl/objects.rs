@@ -46,6 +46,19 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
         }
     }
 
+    /// Writes in new per-vertex data, resets per-instance data.
+    pub fn upload_data(&mut self, vs: Vec<T>, flag: gl::types::GLenum) {
+        let buf_size = (vs.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
+        unsafe {
+            gl::BufferData(
+                self.buffer_type,
+                buf_size,
+                vs.as_ptr() as *const gl::types::GLvoid,
+                flag,
+            );
+        }
+    }
+
     /// Set up per-vertex vertex attribute pointers (interleaved)
     pub fn setup_vertex_attrib_pointers(&self) {
         T::setup_vertex_attrib_pointers();

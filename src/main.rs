@@ -11,8 +11,10 @@ use std::ffi::CString;
 
 mod render_gl;
 mod utils;
-use render_gl::data::{InstanceLocationVertex, VertexRGBTex};
+use render_gl::data::{Cvec4, InstanceLocationVertex, InstanceTransformVertex, VertexRGBTex};
 use render_gl::{objects, shaders};
+
+const NUM_INSTANCES: i32 = 100;
 
 pub fn main() {
     let sdl_context = sdl2::init().unwrap();
@@ -72,31 +74,31 @@ pub fn main() {
             },
         ],
     );
-    let ibo = objects::VertexBufferObject::new_with_vec(
-        gl::ARRAY_BUFFER,
-        (0..100)
-            .map(|i| InstanceLocationVertex {
-                pos: (
-                    (2.0 / 10.0) * (i as f32 % 10.0) - 1.0,
-                    (2.0 / 10.0) * (i as f32 / 10.0) - 1.0,
-                    0.0,
-                    0.0,
-                )
-                    .into(),
-            })
-            .collect(),
-    );
+    let positions: Vec<Cvec4> = (0..NUM_INSTANCES)
+        .map(|i| {
+            (
+                (2.0 / 10.0) * (i as f32 % 10.0) - 1.0,
+                (2.0 / 10.0) * (i as f32 / 10.0).floor() - 1.0,
+                0.0,
+                0.0,
+            )
+                .into()
+        })
+        .collect();
+    let mut ibo = objects::VertexBufferObject::<InstanceTransformVertex>::new(gl::ARRAY_BUFFER);
 
     let ebo = objects::ElementBufferObject::new_with_vec(vec![0, 1, 3, 1, 2, 3]);
 
     let vao = objects::VertexArrayObject::new();
     vao.bind();
-    vbo.bind();
     ebo.bind();
+
+    vbo.bind();
     vbo.setup_vertex_attrib_pointers();
+
     ibo.bind();
     ibo.setup_vertex_attrib_pointers();
-    vbo.bind();
+
     vao.unbind();
 
     let (width, height, pixels) = utils::load_image_u8("container.jpg");
@@ -145,16 +147,27 @@ pub fn main() {
         vao.bind();
         texture1.bind_to_texture_unit(gl::TEXTURE0);
         texture2.bind_to_texture_unit(gl::TEXTURE1);
+
         let time = start_time.elapsed().as_millis();
-        let mut trans = glam::Mat4::IDENTITY;
-        trans *= glam::Mat4::from_rotation_z((time as f32 / 100.0).to_radians());
-        let scalef = ((time as f32 / 300.0).sin() + 1.1) * 0.3;
-        trans *= glam::Mat4::from_scale(glam::vec3(scalef, scalef, scalef));
 
-        shader_program
-            .set_uniform_matrix_4fv(&CString::new("mvp").unwrap(), &trans.to_cols_array());
+        let instance_matrices: Vec<InstanceTransformVertex> = positions
+            .iter()
+            .enumerate()
+            .map(|(i, position)| {
+                let mut trans = glam::Mat4::IDENTITY;
+                trans *= glam::Mat4::from_rotation_z((time as f32 / 100.0).to_radians());
+                let scalef = ((time as f32 / (i as f32 * 10.0)).sin() + 1.1) * 0.3;
+                trans *= glam::Mat4::from_scale(glam::vec3(scalef, scalef, scalef));
+                let instance_trans =
+                    glam::Mat4::from_translation(glam::vec3(position.d0, position.d1, position.d2))
+                        * trans;
+                InstanceTransformVertex::new(instance_trans.to_cols_array())
+            })
+            .collect();
 
-        vao.draw_elements_instanced(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0, 100);
+        ibo.upload_data(instance_matrices, gl::STREAM_DRAW);
+
+        vao.draw_elements_instanced(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0, NUM_INSTANCES);
         vao.unbind();
 
         window.gl_swap_window();
