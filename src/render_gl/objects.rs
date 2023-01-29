@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 pub struct VertexBufferObject<T: super::data::Vertex> {
     /// The internal buffer object ID OpenGL uses to bind/unbind the object.
     pub id: gl::types::GLuint,
@@ -137,6 +139,18 @@ impl VertexArrayObject {
                 offset as *const gl::types::GLvoid,
                 num_instances,
             );
+        }
+    }
+
+    pub fn draw_arrays_instanced(
+        &self,
+        mode: gl::types::GLenum,
+        first: gl::types::GLint,
+        count: gl::types::GLint,
+        num_instances: gl::types::GLint,
+    ) {
+        unsafe {
+            gl::DrawArraysInstanced(mode, first, count, num_instances);
         }
     }
 

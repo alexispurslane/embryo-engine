@@ -1,20 +1,29 @@
 extern crate gl;
 extern crate glam;
 extern crate image;
+extern crate rand;
+extern crate rayon;
 extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 
+use rand::Rng;
 use render_gl::textures;
-use sdl2::event::Event;
 use std::ffi::CString;
+use std::io::{stdout, Write};
 
+mod camera;
+mod entity;
+mod events;
 mod render_gl;
+mod scene;
 mod utils;
-use render_gl::data::{Cvec4, InstanceLocationVertex, InstanceTransformVertex, VertexRGBTex};
+use camera::*;
+use render_gl::data::InstanceTransformVertex;
 use render_gl::{objects, shaders};
+use scene::*;
 
-const NUM_INSTANCES: i32 = 100;
+const NUM_INSTANCES: i32 = 10;
 
 pub fn main() {
     let sdl_context = sdl2::init().unwrap();
@@ -35,6 +44,7 @@ pub fn main() {
     let _gl =
         gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void);
 
+    // Create box object instances with shaders
     let vert_shader = shaders::Shader::from_source(
         &CString::new(include_str!("triangle.vert")).unwrap(),
         gl::VERTEX_SHADER,
@@ -49,54 +59,32 @@ pub fn main() {
 
     let shader_program = shaders::Program::from_shaders(&[vert_shader, frag_shader]).unwrap();
 
-    let vbo = objects::VertexBufferObject::new_with_vec(
-        gl::ARRAY_BUFFER,
-        vec![
-            VertexRGBTex {
-                pos: (0.5, 0.5, 0.0).into(),
-                clr: (1.0, 0.0, 0.0).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexRGBTex {
-                pos: (0.5, -0.5, 0.0).into(),
-                clr: (0.0, 1.0, 0.0).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexRGBTex {
-                pos: (-0.5, -0.5, 0.0).into(),
-                clr: (0.0, 0.0, 1.0).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexRGBTex {
-                pos: (-0.5, 0.5, 0.0).into(),
-                clr: (1.0, 1.0, 0.0).into(),
-                tex: (0.0, 1.0).into(),
-            },
-        ],
-    );
-    let positions: Vec<Cvec4> = (0..NUM_INSTANCES)
-        .map(|i| {
-            (
-                (2.0 / 10.0) * (i as f32 % 10.0) - 1.0,
-                (2.0 / 10.0) * (i as f32 / 10.0).floor() - 1.0,
-                0.0,
-                0.0,
-            )
-                .into()
-        })
-        .collect();
+    let vbo =
+        objects::VertexBufferObject::new_with_vec(gl::ARRAY_BUFFER, utils::shapes::unit_cube());
+
     let mut ibo = objects::VertexBufferObject::<InstanceTransformVertex>::new(gl::ARRAY_BUFFER);
 
-    let ebo = objects::ElementBufferObject::new_with_vec(vec![0, 1, 3, 1, 2, 3]);
+    let mut rng = rand::thread_rng();
+    let instance_model_matrices: Vec<InstanceTransformVertex> = (0..NUM_INSTANCES)
+        .map(|_| {
+            let model = glam::Mat4::from_translation(glam::vec3(
+                rng.gen_range::<f32, _>(-10.0..10.0),
+                rng.gen_range::<f32, _>(-10.0..10.0),
+                rng.gen_range::<f32, _>(-10.0..10.0),
+            ));
+            InstanceTransformVertex::new(model.to_cols_array())
+        })
+        .collect();
 
+    // Craate vertex array object to represent boxes
     let vao = objects::VertexArrayObject::new();
     vao.bind();
-    ebo.bind();
 
     vbo.bind();
     vbo.setup_vertex_attrib_pointers();
 
     ibo.bind();
+    ibo.upload_data(instance_model_matrices, gl::STREAM_DRAW);
     ibo.setup_vertex_attrib_pointers();
 
     vao.unbind();
@@ -124,50 +112,80 @@ pub fn main() {
     unsafe {
         gl::Viewport(0, 0, 1024, 768);
         gl::ClearColor(0.3, 0.3, 0.5, 1.0);
+        gl::Enable(gl::DEPTH_TEST);
     }
 
+    let mut scene = Scene {
+        camera: Box::new(FlyingCamera::new(
+            2.5,
+            glam::Vec3::Y,
+            glam::vec3(0.0, 0.0, 3.0),
+            glam::vec3(0.0, 0.0, -1.0),
+            PitchYawRoll::new(0.0, -90.0, 0.0),
+            50.0,
+        )),
+        command_queue: vec![],
+        running: true,
+    };
+
     let start_time = std::time::Instant::now();
+    let mut last_time = start_time.elapsed().as_millis();
+    let mut dt;
+
+    let mut mouse = events::Mouse {
+        is_initial_move: true,
+        last_x: 1024 / 2,
+        last_y: 768 / 2,
+    };
+
     let mut event_pump = sdl_context.event_pump().unwrap();
-    'running: loop {
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. } => break 'running,
-                _ => {}
-            }
-        }
+    let mut stdout = stdout();
+    while scene.running {
+        let time = start_time.elapsed().as_millis();
+        dt = time - last_time;
+        last_time = time;
+        print!("\rFPS: {}", 1000.0 / dt as f32);
+        stdout.flush().unwrap();
+
+        // Handle keyboard and window events
+        scene.queue_commands(events::handle_window_events(&scene, event_pump.poll_iter()));
+
+        scene.queue_commands(events::handle_keyboard(
+            &scene,
+            &event_pump.keyboard_state(),
+            dt,
+        ));
+        scene.queue_commands(events::handle_mouse(
+            &scene,
+            &mut mouse,
+            &event_pump.mouse_state(),
+        ));
+
+        scene.update(dt);
 
         unsafe {
-            gl::Clear(gl::COLOR_BUFFER_BIT);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
 
+        // Update box uniforms
         shader_program.set_used();
         shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 0);
         shader_program.set_uniform_1i(&CString::new("texture1").unwrap(), 1);
+        shader_program.set_uniform_matrix_4fv(
+            &CString::new("view_matrix").unwrap(),
+            &scene.camera.view().to_cols_array(),
+        );
+        shader_program.set_uniform_matrix_4fv(
+            &CString::new("projection_matrix").unwrap(),
+            &scene.camera.project(1024, 768).to_cols_array(),
+        );
 
+        // Render boxes
         vao.bind();
         texture1.bind_to_texture_unit(gl::TEXTURE0);
         texture2.bind_to_texture_unit(gl::TEXTURE1);
 
-        let time = start_time.elapsed().as_millis();
-
-        let instance_matrices: Vec<InstanceTransformVertex> = positions
-            .iter()
-            .enumerate()
-            .map(|(i, position)| {
-                let mut trans = glam::Mat4::IDENTITY;
-                trans *= glam::Mat4::from_rotation_z((time as f32 / 100.0).to_radians());
-                let scalef = ((time as f32 / (i as f32 * 10.0)).sin() + 1.1) * 0.3;
-                trans *= glam::Mat4::from_scale(glam::vec3(scalef, scalef, scalef));
-                let instance_trans =
-                    glam::Mat4::from_translation(glam::vec3(position.d0, position.d1, position.d2))
-                        * trans;
-                InstanceTransformVertex::new(instance_trans.to_cols_array())
-            })
-            .collect();
-
-        ibo.upload_data(instance_matrices, gl::STREAM_DRAW);
-
-        vao.draw_elements_instanced(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0, NUM_INSTANCES);
+        vao.draw_arrays_instanced(gl::TRIANGLES, 0, 36, NUM_INSTANCES);
         vao.unbind();
 
         window.gl_swap_window();

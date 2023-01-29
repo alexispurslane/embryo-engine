@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::utils::*;
 use std::ffi::{CStr, CString};
 

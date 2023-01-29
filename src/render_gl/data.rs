@@ -165,6 +165,15 @@ pub struct VertexRGB {
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]
 #[repr(C, packed)]
+pub struct VertexTex {
+    #[location = 0]
+    pub pos: Cvec3,
+    #[location = 1]
+    pub tex: Cvec2,
+}
+
+#[derive(VertexAttribPointers, Copy, Clone, Debug)]
+#[repr(C, packed)]
 pub struct VertexRGBTex {
     #[location = 0]
     pub pos: Cvec3,
