@@ -1,3 +1,4 @@
+use crate::utils;
 use std::marker::PhantomData;
 
 pub struct TextureParameters {
@@ -123,4 +124,16 @@ impl<T: ColorDepth> Drop for Texture<T> {
             gl::DeleteTextures(1, &mut self.id);
         }
     }
+}
+
+pub fn get_texture_simple(path: &'static str) -> Texture<RGB8> {
+    let (width, height, pixels) = utils::load_image_u8(path);
+
+    Texture::new_with_bytes(
+        gl::TEXTURE_2D,
+        TextureParameters::default(),
+        &pixels,
+        width,
+        height,
+    )
 }

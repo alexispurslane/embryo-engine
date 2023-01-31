@@ -5,6 +5,21 @@ extern crate syn;
 #[macro_use]
 extern crate quote;
 
+#[proc_macro_derive(ComponentId)]
+pub fn component_id_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let ast: syn::DeriveInput = syn::parse(input).unwrap();
+    let type_name = &ast.ident;
+    let name = &ast.ident.to_string();
+    quote! {
+        impl Component for #type_name {
+            fn get_id() -> ComponentID {
+                #name
+            }
+        }
+    }
+    .into()
+}
+
 #[proc_macro_derive(VertexAttribPointers, attributes(location, divisor))]
 pub fn vertex_attrib_pointers_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = syn::parse(input).unwrap();

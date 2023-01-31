@@ -5,7 +5,7 @@ use sdl2::keyboard::{KeyboardState, Scancode};
 use sdl2::mouse::MouseState;
 use sdl2::mouse::RelativeMouseState;
 
-use crate::camera::PitchYawRoll;
+use crate::entity::transform_component::PitchYawRoll;
 
 pub fn handle_keyboard(
     _scene: &Scene,

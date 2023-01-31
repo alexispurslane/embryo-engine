@@ -18,11 +18,25 @@ pub fn load_image_u8(path: &str) -> (u32, u32, Vec<u8>) {
     )
 }
 
+pub fn clear_screen() {
+    unsafe {
+        gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+    }
+}
+
+pub fn setup_viewport((w, h): (u32, u32)) {
+    unsafe {
+        gl::Viewport(0, 0, w as gl::types::GLint, h as gl::types::GLint);
+        gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+        gl::Enable(gl::DEPTH_TEST);
+    }
+}
+
 pub mod shapes {
     use crate::render_gl::data::VertexTex;
 
-    pub fn unit_cube() -> Vec<VertexTex> {
-        vec![
+    pub fn unit_cube() -> &'static [VertexTex] {
+        &[
             VertexTex {
                 pos: (-0.5, -0.5, -0.5).into(),
                 tex: (0.0, 0.0).into(),

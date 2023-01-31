@@ -27,35 +27,22 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     }
 
     /// Request a new buffer and initialize it with the given vector.
-    pub fn new_with_vec(bt: gl::types::GLenum, vs: Vec<T>) -> Self {
+    pub fn new_with_vec(bt: gl::types::GLenum, vs: &[T]) -> Self {
         let mut vbo = Self::new(bt);
         vbo.bind();
-        vbo.upload_static_draw_data(vs);
+        vbo.upload_data(vs, gl::STATIC_DRAW);
         vbo.unbind();
         vbo
     }
 
-    /// Writes in new per-vertex data, resets per-instance data.
-    pub fn upload_static_draw_data(&mut self, vs: Vec<T>) {
-        let buf_size = (vs.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
+    /// Writes in new per-vertex data
+    pub fn upload_data(&mut self, buffer: &[T], flag: gl::types::GLenum) {
         unsafe {
+            let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
             gl::BufferData(
                 self.buffer_type,
                 buf_size,
-                vs.as_ptr() as *const gl::types::GLvoid,
-                gl::STATIC_DRAW,
-            );
-        }
-    }
-
-    /// Writes in new per-vertex data, resets per-instance data.
-    pub fn upload_data(&mut self, vs: Vec<T>, flag: gl::types::GLenum) {
-        let buf_size = (vs.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
-        unsafe {
-            gl::BufferData(
-                self.buffer_type,
-                buf_size,
-                vs.as_ptr() as *const gl::types::GLvoid,
+                buffer.as_ptr() as *const gl::types::GLvoid,
                 flag,
             );
         }
@@ -177,6 +164,7 @@ impl Drop for VertexArrayObject {
 
 pub struct ElementBufferObject {
     pub id: gl::types::GLuint,
+    pub count: gl::types::GLuint,
 }
 
 impl ElementBufferObject {
@@ -185,26 +173,29 @@ impl ElementBufferObject {
         unsafe {
             gl::GenBuffers(1, &mut ebo);
         }
-        ElementBufferObject { id: ebo }
+        ElementBufferObject { id: ebo, count: 0 }
     }
 
-    pub fn new_with_vec(is: Vec<u32>) -> Self {
-        let ebo = Self::new();
+    pub fn new_with_vec(is: &[u32]) -> Self {
+        let mut ebo = Self::new();
         ebo.bind();
-        ebo.upload_static_draw_data(is);
-        ebo.bind();
+        ebo.upload_data(is, gl::STATIC_DRAW);
+        ebo.unbind();
         ebo
     }
 
-    pub fn upload_static_draw_data(&self, is: Vec<u32>) {
+    /// Writes in new vertex occurence data
+    pub fn upload_data(&mut self, buffer: &[u32], flag: gl::types::GLenum) {
         unsafe {
+            let buf_size = (buffer.len() * std::mem::size_of::<u32>()) as gl::types::GLsizeiptr;
             gl::BufferData(
                 gl::ELEMENT_ARRAY_BUFFER,
-                (is.len() * std::mem::size_of::<u32>()) as gl::types::GLsizeiptr,
-                is.as_ptr() as *const gl::types::GLvoid,
-                gl::STATIC_DRAW,
+                buf_size,
+                buffer.as_ptr() as *const gl::types::GLvoid,
+                flag,
             );
         }
+        self.count = buffer.len() as gl::types::GLuint;
     }
 
     pub fn bind(&self) {

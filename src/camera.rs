@@ -1,16 +1,5 @@
+use crate::entity::transform_component::PitchYawRoll;
 use crate::utils::Degrees;
-
-#[derive(Copy, Clone, Debug)]
-pub struct PitchYawRoll {
-    pub pitch: f32,
-    pub yaw: f32,
-    pub roll: f32,
-}
-impl PitchYawRoll {
-    pub fn new(pitch: f32, yaw: f32, roll: f32) -> Self {
-        PitchYawRoll { pitch, yaw, roll }
-    }
-}
 
 pub trait Camera {
     fn displace(&mut self, v: glam::Vec3, dt: u128);

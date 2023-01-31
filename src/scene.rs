@@ -1,4 +1,6 @@
-use crate::camera::{Camera, PitchYawRoll};
+use crate::camera::Camera;
+use crate::entity::transform_component::PitchYawRoll;
+use crate::entity::EntitySystem;
 
 pub type Direction = glam::Vec3;
 pub enum SceneCommand {
@@ -11,6 +13,7 @@ pub struct Scene {
     pub camera: Box<dyn Camera>,
     pub command_queue: Vec<SceneCommand>,
     pub running: bool,
+    pub entities: EntitySystem,
 }
 
 impl Scene {
