@@ -1,82 +1,110 @@
-use crate::render_gl::data::InstanceTransformVertex;
+use crate::render_gl::{data, objects};
 
 use super::*;
+use glam::Vec4Swizzles;
 use render_gl_derive::ComponentId;
-
-#[derive(Copy, Clone, Debug)]
-pub struct PitchYawRoll {
-    pub pitch: f32,
-    pub yaw: f32,
-    pub roll: f32,
-}
-impl PitchYawRoll {
-    pub fn new(pitch: f32, yaw: f32, roll: f32) -> Self {
-        PitchYawRoll { pitch, yaw, roll }
-    }
-}
 
 #[derive(ComponentId)]
 pub struct TransformComponent {
-    pub rotations: Vec<PitchYawRoll>,
-    pub positions: Vec<glam::Vec3>,
-    pub scales: Vec<f32>,
-    pub up: glam::Vec3,
+    pub instance_transforms: Vec<glam::Mat4>,
+    pub ibo: objects::VertexBufferObject<data::InstanceTransformVertex>,
+    pub instances: u32,
+    pub dirty_flag: bool,
     pub position_change_flag: gl::types::GLenum,
 }
 
 impl TransformComponent {
-    /// Apply the given vector along the forward direction indicated by the yaw
-    /// (left-right turning) without using pitch (up down turning) to modify movement
-    pub fn displace_along_absolute_plane(&mut self, idx: usize, rel_vec: glam::Vec3) {
-        let rot = self.rotations[idx];
-        let front = glam::Vec3::X
-            * glam::vec3(rot.yaw.to_radians().cos(), 1.0, rot.yaw.to_radians().sin()).normalize();
-        self.positions[idx] += (rel_vec.x * front)
-            + (rel_vec.y * front.cross(self.up).normalize())
-            + (rel_vec.z * self.up);
+    pub fn new_from_rot_trans(rot: glam::Vec3, trans: glam::Vec3, pcf: gl::types::GLenum) -> Self {
+        let quat = glam::Quat::from_euler(
+            glam::EulerRot::XYZ,
+            rot.x.to_radians(),
+            rot.y.to_radians(),
+            rot.z.to_radians(),
+        );
+        let matrix = glam::Mat4::from_rotation_translation(quat, trans);
+        let ibo = objects::VertexBufferObject::new_with_vec(
+            gl::ARRAY_BUFFER,
+            &[data::InstanceTransformVertex::new(matrix.to_cols_array())],
+        );
+        Self {
+            instance_transforms: vec![matrix],
+            instances: 1,
+            dirty_flag: false,
+            position_change_flag: pcf,
+            ibo,
+        }
     }
 
-    /// Fly in the direction pointed using the vector
-    pub fn displace_along_own_plane(&mut self, idx: usize, rel_vec: glam::Vec3) {
-        let rot = self.rotations[idx];
-        let front = glam::vec3(
-            rot.yaw.to_radians().cos() * rot.pitch.to_radians().cos(),
-            rot.pitch.to_radians().sin(),
-            rot.yaw.to_radians().sin() * rot.pitch.to_radians().cos(),
-        )
-        .normalize();
-        self.positions[idx] += (rel_vec.x * front)
-            + (rel_vec.y * front.cross(self.up).normalize())
-            + (rel_vec.z * self.up);
-    }
-
-    pub fn matrix_transforms(&self) -> Vec<InstanceTransformVertex> {
-        self.positions
+    pub fn new_from_rot_trans_instances(
+        instances: Vec<(glam::Vec3, glam::Vec3)>,
+        pcf: gl::types::GLenum,
+    ) -> Self {
+        let instance_transforms: Vec<_> = instances
             .iter()
-            .zip(self.rotations.iter())
-            .map(|(pos, rot)| {
-                let model = glam::Mat4::from_rotation_translation(
-                    glam::Quat::from_euler(glam::EulerRot::YXZ, rot.yaw, rot.pitch, rot.roll),
-                    *pos,
+            .map(|(rot, trans)| {
+                let quat = glam::Quat::from_euler(
+                    glam::EulerRot::XYZ,
+                    rot.x.to_radians(),
+                    rot.y.to_radians(),
+                    rot.z.to_radians(),
                 );
-                InstanceTransformVertex::new(model.to_cols_array())
+                glam::Mat4::from_rotation_translation(quat, *trans)
             })
-            .collect()
+            .collect();
+
+        let ibo = objects::VertexBufferObject::new_with_vec(
+            gl::ARRAY_BUFFER,
+            &instance_transforms
+                .iter()
+                .map(|mat| data::InstanceTransformVertex::new(mat.to_cols_array()))
+                .collect::<Vec<_>>()[..],
+        );
+        let instances = instance_transforms.len() as u32;
+        Self {
+            instance_transforms,
+            instances,
+            dirty_flag: false,
+            position_change_flag: pcf,
+            ibo,
+        }
     }
 
-    pub fn points_of_view(&self) -> Vec<glam::Mat4> {
-        self.positions
-            .iter()
-            .zip(self.rotations.iter())
-            .map(|(pos, rot)| {
-                let front = glam::vec3(
-                    rot.yaw.to_radians().cos() * rot.pitch.to_radians().cos(),
-                    rot.pitch.to_radians().sin(),
-                    rot.yaw.to_radians().sin() * rot.pitch.to_radians().cos(),
-                )
-                .normalize();
-                glam::Mat4::look_at_rh(*pos, *pos + front, self.up)
-            })
-            .collect()
+    pub fn displace_by(&mut self, idx: usize, rel_vec: glam::Vec3) {
+        self.instance_transforms[idx] *= glam::Mat4::from_translation(rel_vec);
+        self.dirty_flag = true;
+    }
+
+    pub fn rotate(&mut self, idx: usize, pyr: glam::Vec3) {
+        let rot_matrix = glam::Mat4::from_rotation_translation(
+            glam::Quat::from_euler(glam::EulerRot::XYZ, pyr.x, pyr.y, pyr.z),
+            glam::Vec3::ZERO,
+        );
+        self.instance_transforms[idx] *= rot_matrix;
+        self.dirty_flag = true;
+    }
+
+    /// Upload the new transform matrices stored on this component into the
+    /// instance buffer object on video memory for the renderer to use. Only use
+    /// if the dirty flag is true
+    pub fn update_ibo(&mut self) {
+        self.ibo.upload_data(
+            &self
+                .instance_transforms
+                .iter()
+                .map(|mat| data::InstanceTransformVertex::new(mat.to_cols_array()))
+                .collect::<Vec<_>>()[..],
+            self.position_change_flag,
+        );
+        self.dirty_flag = false;
+    }
+
+    pub fn point_of_view(&self, idx: usize) -> glam::Mat4 {
+        let mat = self.instance_transforms[idx];
+        // By default, all objects face in the Z direction (right), so all rotations are relative to that
+        let front = mat.transform_vector3(glam::Vec3::Z).normalize();
+        // By default, Y is up
+        let up = mat.transform_vector3(glam::Vec3::Y).normalize();
+        let pos = mat.col(3).xyz();
+        glam::Mat4::look_at_rh(pos, pos + front, up)
     }
 }

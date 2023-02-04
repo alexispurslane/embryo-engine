@@ -35,8 +35,8 @@ pub fn setup_viewport((w, h): (u32, u32)) {
 pub mod shapes {
     use crate::render_gl::data::VertexTex;
 
-    pub fn unit_cube() -> &'static [VertexTex] {
-        &[
+    pub fn unit_cube() -> [VertexTex; 36] {
+        [
             VertexTex {
                 pos: (-0.5, -0.5, -0.5).into(),
                 tex: (0.0, 0.0).into(),

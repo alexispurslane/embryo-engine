@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
 };
 
+pub mod camera_component;
 pub mod render_component;
 pub mod transform_component;
 
@@ -18,7 +19,7 @@ pub struct Entity {
     pub id: EntityID,
 }
 
-trait ComponentVec {
+pub trait ComponentVec {
     fn add_new_entity_col(&mut self);
     fn remove_entity_col(&mut self, eid: EntityID);
 
@@ -93,8 +94,8 @@ impl EntitySystem {
         }
     }
 
-    pub fn remove_component(&mut self, eid: EntityID, cid: ComponentID) {
-        if let Some(component_vec) = self.components.get_mut(&cid) {
+    pub fn remove_component<T: Component + 'static>(&mut self, eid: EntityID) {
+        if let Some(component_vec) = self.components.get_mut(&T::get_id()) {
             component_vec.remove_entity_col(eid);
         }
     }
@@ -141,23 +142,21 @@ impl EntitySystem {
         &'a self,
         ts: &'a Ref<Vec<Option<T>>>,
         us: &'a Ref<Vec<Option<U>>>,
-    ) -> Vec<(EntityID, &T, &U)> {
+    ) -> impl Iterator<Item = (EntityID, &T, &U)> {
         ts.iter()
             .enumerate()
             .zip(us.iter())
             .filter_map(|((i, t), u)| Some((i, t.as_ref()?, u.as_ref()?)))
-            .collect()
     }
 
     pub fn get_with_components_mut<'a, T: Component + 'static, U: Component + 'static>(
         &'a self,
         ts: &'a mut RefMut<Vec<Option<T>>>,
         us: &'a mut RefMut<Vec<Option<U>>>,
-    ) -> Vec<(EntityID, &mut T, &mut U)> {
+    ) -> impl Iterator<Item = (EntityID, &mut T, &mut U)> {
         ts.iter_mut()
             .enumerate()
             .zip(us.iter_mut())
             .filter_map(|((i, t), u)| Some((i, t.as_mut()?, u.as_mut()?)))
-            .collect()
     }
 }

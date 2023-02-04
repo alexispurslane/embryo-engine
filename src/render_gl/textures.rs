@@ -42,6 +42,12 @@ impl ColorDepth for RGB32F {
     }
 }
 
+pub trait AbstractTexture {
+    fn bind_to_texture_unit(&self, tex_unit: gl::types::GLenum);
+    fn bind(&self);
+    fn unbind(&self);
+}
+
 pub struct Texture<T: ColorDepth> {
     pub id: gl::types::GLuint,
     pub ty: gl::types::GLenum,
@@ -97,21 +103,23 @@ impl<T: ColorDepth> Texture<T> {
             gl::GenerateMipmap(gl::TEXTURE_2D);
         }
     }
+}
 
-    pub fn bind_to_texture_unit(&self, tex_unit: gl::types::GLenum) {
+impl<T: ColorDepth> AbstractTexture for Texture<T> {
+    fn bind_to_texture_unit(&self, tex_unit: gl::types::GLenum) {
         unsafe {
             gl::ActiveTexture(tex_unit);
         }
         self.bind();
     }
 
-    pub fn bind(&self) {
+    fn bind(&self) {
         unsafe {
             gl::BindTexture(self.ty, self.id);
         }
     }
 
-    pub fn unbind(&self) {
+    fn unbind(&self) {
         unsafe {
             gl::BindTexture(self.ty, 0);
         }
