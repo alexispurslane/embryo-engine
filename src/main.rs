@@ -7,25 +7,19 @@ extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 
-use entity::camera_component::CameraComponent;
-use entity::render_component::{self, RenderComponent};
-use entity::transform_component::TransformComponent;
 use entity::EntitySystem;
-use rand::Rng;
-use render_gl::textures;
-use sdl2::video::SwapInterval;
-use std::ffi::CString;
+use scene::*;
 use std::io::{stdout, Write};
 
 mod entity;
 mod events;
 mod render_gl;
 mod scene;
+mod systems;
 mod utils;
-use render_gl::{objects, shaders};
-use scene::*;
 
-const NUM_INSTANCES: i32 = 10;
+const NUM_INSTANCES: i32 = 100;
+const UPDATE_INTERVAL: u128 = 16;
 
 pub fn main() {
     let sdl_context = sdl2::init().unwrap();
@@ -57,14 +51,14 @@ pub fn main() {
         entities: EntitySystem::new(),
     };
 
-    add_camera(&mut scene);
-    add_textured_cube_instances(&mut scene);
-
-    render_component::setup_render_components_system(&mut scene.entities);
+    systems::add_camera(&mut scene);
+    systems::add_textured_cube_instances(&mut scene);
+    systems::setup_render_components(&mut scene.entities);
 
     let start_time = std::time::Instant::now();
     let mut last_time = start_time.elapsed().as_millis();
     let mut dt;
+    let mut lag = 0;
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut stdout = stdout();
@@ -74,6 +68,7 @@ pub fn main() {
         let time = start_time.elapsed().as_millis();
         dt = time - last_time;
         last_time = time;
+        lag += dt;
         print!("\rFPS: {}", 1000.0 / dt as f32);
         stdout.flush().unwrap();
 
@@ -90,81 +85,16 @@ pub fn main() {
         ));
         scene.update(dt as f32);
 
+        /*while lag <= UPDATE_INTERVAL {
+            scene.update(UPDATE_INTERVAL as f32);
+            lag -= UPDATE_INTERVAL;
+        }*/
+
         // Render
         utils::clear_screen();
-        render_component::render_system(&scene);
+        let (width, height) = window.size();
+        systems::render(&scene, width, height);
 
         window.gl_swap_window();
     }
-}
-
-pub fn add_camera(scene: &mut Scene) {
-    let e = scene.entities.new_entity();
-    scene.entities.add_component(
-        e.id,
-        TransformComponent::new_from_rot_trans(
-            glam::Vec3::Y,
-            glam::vec3(0.0, 0.0, -3.0),
-            gl::STREAM_DRAW,
-        ),
-    );
-    scene
-        .entities
-        .add_component(e.id, CameraComponent { fov: 90.0 });
-    scene.camera = Some(e.id);
-}
-
-pub fn add_textured_cube_instances(scene: &mut Scene) {
-    // Create box object instances with shaders
-    let vert_shader = shaders::Shader::from_source(
-        &CString::new(include_str!("triangle.vert")).unwrap(),
-        gl::VERTEX_SHADER,
-    )
-    .unwrap();
-
-    let frag_shader = shaders::Shader::from_source(
-        &CString::new(include_str!("triangle.frag")).unwrap(),
-        gl::FRAGMENT_SHADER,
-    )
-    .unwrap();
-
-    let cube = utils::shapes::unit_cube();
-    let vbo = objects::VertexBufferObject::new_with_vec(gl::ARRAY_BUFFER, &cube);
-
-    let texture1 = textures::get_texture_simple("container.jpg");
-    let texture2 = textures::get_texture_simple("awesomeface.png");
-
-    let boxes = scene.entities.new_entity();
-    scene.entities.add_component(
-        boxes.id,
-        RenderComponent::new(
-            &[frag_shader, vert_shader],
-            Box::new(vbo),
-            None,
-            vec![
-                ("texture1", Box::new(texture1)),
-                ("texture2", Box::new(texture2)),
-            ],
-        ),
-    );
-
-    let mut rng = rand::thread_rng();
-    scene.entities.add_component(
-        boxes.id,
-        TransformComponent::new_from_rot_trans_instances(
-            (0..NUM_INSTANCES)
-                .map(|_| {
-                    (
-                        glam::Vec3::X,
-                        glam::vec3(
-                            rng.gen_range::<f32, _>(-5.0..5.0),
-                            rng.gen_range::<f32, _>(-5.0..5.0),
-                            rng.gen_range::<f32, _>(-5.0..5.0),
-                        ),
-                    )
-                })
-                .collect(),
-            gl::STATIC_DRAW,
-        ),
-    );
 }

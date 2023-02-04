@@ -9,7 +9,7 @@ pub struct CameraComponent {
 }
 
 impl CameraComponent {
-    pub fn project(&self, width: i32, height: i32) -> glam::Mat4 {
+    pub fn project(&self, width: u32, height: u32) -> glam::Mat4 {
         glam::Mat4::perspective_rh_gl(
             self.fov.to_radians(),
             width as f32 / height as f32,
