@@ -5,7 +5,7 @@ use std::{
 };
 
 pub mod camera_component;
-pub mod render_component;
+pub mod mesh_component;
 pub mod transform_component;
 
 pub type ComponentID = &'static str;

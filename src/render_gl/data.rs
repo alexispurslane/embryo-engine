@@ -168,7 +168,7 @@ pub struct VertexRGB {
 pub struct VertexTex {
     #[location = 0]
     pub pos: Cvec3,
-    #[location = 1]
+    #[location = 2]
     pub tex: Cvec2,
 }
 
@@ -179,6 +179,17 @@ pub struct VertexRGBTex {
     pub pos: Cvec3,
     #[location = 1]
     pub clr: Cvec3,
+    #[location = 2]
+    pub tex: Cvec2,
+}
+
+#[derive(VertexAttribPointers, Copy, Clone, Debug)]
+#[repr(C, packed)]
+pub struct VertexNormTex {
+    #[location = 0]
+    pub pos: Cvec3,
+    #[location = 1]
+    pub norm: Cvec3,
     #[location = 2]
     pub tex: Cvec2,
 }

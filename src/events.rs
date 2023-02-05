@@ -24,11 +24,9 @@ pub fn handle_keyboard(
     vec![SceneCommand::MoveCameraInDirection(camera_movement)]
 }
 
-const MOUSE_SENSITIVITY: f32 = 0.1;
-
 pub fn handle_mouse(_scene: &Scene, mouse_state: &RelativeMouseState) -> Vec<SceneCommand> {
-    let yo = mouse_state.y() as f32 * MOUSE_SENSITIVITY;
-    let xo = mouse_state.x() as f32 * MOUSE_SENSITIVITY;
+    let yo = mouse_state.y() as f32;
+    let xo = mouse_state.x() as f32;
     vec![SceneCommand::RotateCamera(glam::vec3(yo, -xo, 0.0))]
 }
 

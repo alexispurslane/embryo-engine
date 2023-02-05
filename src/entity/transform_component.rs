@@ -11,6 +11,7 @@ pub struct TransformComponent {
     pub instances: u32,
     pub dirty_flag: bool,
     pub position_change_flag: gl::types::GLenum,
+    look_angle: f32,
 }
 
 impl TransformComponent {
@@ -32,6 +33,7 @@ impl TransformComponent {
             dirty_flag: false,
             position_change_flag: pcf,
             ibo,
+            look_angle: 0.0,
         }
     }
 
@@ -66,6 +68,7 @@ impl TransformComponent {
             dirty_flag: false,
             position_change_flag: pcf,
             ibo,
+            look_angle: 0.0,
         }
     }
 
@@ -75,11 +78,15 @@ impl TransformComponent {
     }
 
     pub fn rotate(&mut self, idx: usize, pyr: glam::Vec3) {
-        let rot_matrix = glam::Mat4::from_rotation_translation(
-            glam::Quat::from_euler(glam::EulerRot::XYZ, pyr.x, pyr.y, pyr.z),
-            glam::Vec3::ZERO,
-        );
-        self.instance_transforms[idx] *= rot_matrix;
+        let new_matrix = self.instance_transforms[idx]
+            * glam::Mat4::from_rotation_translation(
+                glam::Quat::from_euler(glam::EulerRot::XYZ, pyr.x, pyr.y, pyr.z),
+                glam::Vec3::ZERO,
+            );
+        if pyr.x + self.look_angle > -89.0 && pyr.x + self.look_angle < 89.0 {
+            self.instance_transforms[idx] = new_matrix;
+            self.look_angle += pyr.x;
+        }
         self.dirty_flag = true;
     }
 
@@ -102,9 +109,8 @@ impl TransformComponent {
         let mat = self.instance_transforms[idx];
         // By default, all objects face in the Z direction (right), so all rotations are relative to that
         let front = mat.transform_vector3(glam::Vec3::Z).normalize();
-        // By default, Y is up
-        let up = mat.transform_vector3(glam::Vec3::Y).normalize();
         let pos = mat.col(3).xyz();
-        glam::Mat4::look_at_rh(pos, pos + front, up)
+        // We are *always* right side up, so we don't get the up vector
+        glam::Mat4::look_at_rh(pos, pos + front, glam::Vec3::Y)
     }
 }

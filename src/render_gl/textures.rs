@@ -23,19 +23,19 @@ pub trait ColorDepth {
     fn get_gl_type() -> gl::types::GLenum;
 }
 
-type RGB8 = u8;
+pub type RGB8 = u8;
 impl ColorDepth for RGB8 {
     fn get_gl_type() -> gl::types::GLenum {
         gl::UNSIGNED_BYTE
     }
 }
-type RGB16 = u16;
+pub type RGB16 = u16;
 impl ColorDepth for RGB16 {
     fn get_gl_type() -> gl::types::GLenum {
         gl::UNSIGNED_SHORT
     }
 }
-type RGB32F = f32;
+pub type RGB32F = f32;
 impl ColorDepth for RGB32F {
     fn get_gl_type() -> gl::types::GLenum {
         gl::FLOAT
@@ -50,8 +50,9 @@ pub trait AbstractTexture {
 
 pub struct Texture<T: ColorDepth> {
     pub id: gl::types::GLuint,
-    pub ty: gl::types::GLenum,
+    pub unit: gl::types::GLenum,
     pub parameters: TextureParameters,
+    pub texture_type: Option<russimp::material::TextureType>,
     phantom: PhantomData<T>,
 }
 
@@ -63,8 +64,9 @@ impl<T: ColorDepth> Texture<T> {
         }
         Self {
             id: texture,
-            ty,
+            unit: ty,
             parameters,
+            texture_type: None,
             phantom: PhantomData,
         }
     }
@@ -85,12 +87,20 @@ impl<T: ColorDepth> Texture<T> {
 
     pub fn load_texture_from_bytes(&self, bytes: &Vec<T>, width: u32, height: u32) {
         unsafe {
-            gl::TexParameteri(self.ty, gl::TEXTURE_WRAP_S, self.parameters.wrap_s);
-            gl::TexParameteri(self.ty, gl::TEXTURE_WRAP_T, self.parameters.wrap_t);
-            gl::TexParameteri(self.ty, gl::TEXTURE_MIN_FILTER, self.parameters.min_filter);
-            gl::TexParameteri(self.ty, gl::TEXTURE_MAG_FILTER, self.parameters.mag_filter);
+            gl::TexParameteri(self.unit, gl::TEXTURE_WRAP_S, self.parameters.wrap_s);
+            gl::TexParameteri(self.unit, gl::TEXTURE_WRAP_T, self.parameters.wrap_t);
+            gl::TexParameteri(
+                self.unit,
+                gl::TEXTURE_MIN_FILTER,
+                self.parameters.min_filter,
+            );
+            gl::TexParameteri(
+                self.unit,
+                gl::TEXTURE_MAG_FILTER,
+                self.parameters.mag_filter,
+            );
             gl::TexImage2D(
-                self.ty,
+                self.unit,
                 0,
                 gl::RGB as gl::types::GLint,
                 width as gl::types::GLsizei,
@@ -115,13 +125,13 @@ impl<T: ColorDepth> AbstractTexture for Texture<T> {
 
     fn bind(&self) {
         unsafe {
-            gl::BindTexture(self.ty, self.id);
+            gl::BindTexture(self.unit, self.id);
         }
     }
 
     fn unbind(&self) {
         unsafe {
-            gl::BindTexture(self.ty, 0);
+            gl::BindTexture(self.unit, 0);
         }
     }
 }

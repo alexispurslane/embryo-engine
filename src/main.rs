@@ -3,6 +3,7 @@ extern crate glam;
 extern crate image;
 extern crate rand;
 extern crate rayon;
+extern crate russimp;
 extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
@@ -30,7 +31,7 @@ pub fn main() {
     gl_attr.set_context_version(4, 3);
 
     let window = video_subsystem
-        .window("Project Gilgamesh v0.1.0", 1024, 768)
+        .window("Project Gilgamesh v0.1.0", 1920, 1080)
         .position_centered()
         .opengl()
         .build()
@@ -49,11 +50,12 @@ pub fn main() {
         command_queue: vec![],
         running: true,
         entities: EntitySystem::new(),
+        shader_programs: vec![],
     };
 
     systems::add_camera(&mut scene);
-    systems::add_textured_cube_instances(&mut scene);
-    systems::setup_render_components(&mut scene.entities);
+    systems::add_level(&mut scene);
+    systems::setup_mesh_components(&mut scene.entities);
 
     let start_time = std::time::Instant::now();
     let mut last_time = start_time.elapsed().as_millis();

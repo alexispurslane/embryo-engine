@@ -1,6 +1,10 @@
 use crate::entity::camera_component::CameraComponent;
 use crate::entity::transform_component::TransformComponent;
 use crate::entity::{EntityID, EntitySystem};
+use crate::render_gl::shaders::Program;
+
+const MOUSE_SENSITIVITY: f32 = 0.3;
+const MOTION_SPEED: f32 = 5.0;
 
 pub type Direction = glam::Vec3;
 pub type PitchYawRoll = glam::Vec3;
@@ -15,6 +19,7 @@ pub struct Scene {
     pub command_queue: Vec<SceneCommand>,
     pub running: bool,
     pub entities: EntitySystem,
+    pub shader_programs: Vec<Program>,
 }
 
 impl Scene {
@@ -34,9 +39,11 @@ impl Scene {
         while let Some(command) = self.command_queue.pop() {
             match command {
                 SceneCommand::MoveCameraInDirection(d) => {
-                    camera_transform.displace_by(0, d * (dt / 1000.0))
+                    camera_transform.displace_by(0, d * MOTION_SPEED * (dt / 1000.0))
                 }
-                SceneCommand::RotateCamera(pyr) => camera_transform.rotate(0, pyr),
+                SceneCommand::RotateCamera(pyr) => {
+                    camera_transform.rotate(0, pyr * MOUSE_SENSITIVITY * dt / 1000.0)
+                }
                 SceneCommand::Exit() => self.running = false,
             }
         }

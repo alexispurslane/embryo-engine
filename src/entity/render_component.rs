@@ -10,7 +10,7 @@ use super::*;
 
 type TextureID = &'static str;
 
-pub struct RenderComponent {
+pub struct MeshComponent {
     pub vao: objects::VertexArrayObject,
     pub vbo: Box<dyn objects::Buffer>,
     pub ebo: Option<objects::ElementBufferObject>,
@@ -18,13 +18,13 @@ pub struct RenderComponent {
     pub program: shaders::Program,
 }
 
-impl Component for RenderComponent {
+impl Component for MeshComponent {
     fn get_id() -> ComponentID {
-        "RenderComponent"
+        "MeshComponent"
     }
 }
 
-impl RenderComponent {
+impl MeshComponent {
     pub fn new(
         shaders: &[shaders::Shader],
         vbo: Box<dyn objects::Buffer>,
