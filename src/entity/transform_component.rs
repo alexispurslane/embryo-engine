@@ -91,12 +91,16 @@ impl TransformComponent {
     /// the object is pointing*
     pub fn displace_by(&mut self, idx: usize, rel_vec: glam::Vec3) {
         let rot = self.instance_transforms[idx].rot;
-        let direction = (glam::vec3(rot.y.to_radians().cos(), 0.0, rot.y.to_radians().sin())
-            * glam::Vec3::Z)
-            .normalize();
+        let direction = glam::vec3(
+            (rot.y.to_radians()).cos() * (rot.x.to_radians()).cos(),
+            (rot.x.to_radians()).sin(),
+            (rot.y.to_radians()).sin() * (rot.x.to_radians()).cos(),
+        )
+        .normalize();
         self.instance_transforms[idx].trans += rel_vec.z * direction
-            + rel_vec.x * direction.cross(glam::Vec3::Y)
+            + rel_vec.x * direction.cross(glam::Vec3::Y).normalize()
             + rel_vec.y * glam::Vec3::Y;
+        println!("{:?}", direction);
         self.dirty_matrices.insert(idx);
     }
 
@@ -105,7 +109,7 @@ impl TransformComponent {
         self.instance_transforms[idx].rot.x =
             (self.instance_transforms[idx].rot.x + pyr.x).clamp(-89.0, 89.0);
         // Yaw
-        self.instance_transforms[idx].rot.y += pyr.y;
+        self.instance_transforms[idx].rot.y = (self.instance_transforms[idx].rot.y + pyr.y) % 360.0;
         self.dirty_matrices.insert(idx);
     }
 
@@ -125,10 +129,14 @@ impl TransformComponent {
     }
 
     pub fn point_of_view(&self, idx: usize) -> glam::Mat4 {
-        // By default, all objects face in the Z direction (right), so all rotations are relative to that
-        let (_, rot, pos) = self.instance_matrices[idx].to_scale_rotation_translation();
-        let front = rot * glam::Vec3::Z;
+        let Transform { trans: pos, rot } = self.instance_transforms[idx];
+        let direction = glam::vec3(
+            (-rot.y.to_radians()).cos() * (-rot.x.to_radians()).cos(),
+            (-rot.x.to_radians()).sin(),
+            (-rot.y.to_radians()).sin() * (-rot.x.to_radians()).cos(),
+        )
+        .normalize();
         // We are *always* right side up, so we don't get the up vector
-        glam::Mat4::look_at_rh(pos, pos + front, glam::Vec3::Y)
+        glam::Mat4::look_at_rh(-pos, -pos + direction, glam::Vec3::Y)
     }
 }
