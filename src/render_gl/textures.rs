@@ -43,28 +43,26 @@ impl ColorDepth for RGB32F {
 }
 
 pub trait AbstractTexture {
-    fn bind_to_texture_unit(&self, tex_unit: gl::types::GLenum);
+    fn activate(&self, tex_unit: gl::types::GLenum);
     fn bind(&self);
     fn unbind(&self);
 }
 
 pub struct Texture<T: ColorDepth> {
     pub id: gl::types::GLuint,
-    pub unit: gl::types::GLenum,
     pub parameters: TextureParameters,
     pub texture_type: Option<russimp::material::TextureType>,
     phantom: PhantomData<T>,
 }
 
 impl<T: ColorDepth> Texture<T> {
-    pub fn new(ty: gl::types::GLenum, parameters: TextureParameters) -> Self {
+    pub fn new(parameters: TextureParameters) -> Self {
         let mut texture: gl::types::GLuint = 0;
         unsafe {
             gl::GenTextures(1, &mut texture);
         }
         Self {
             id: texture,
-            unit: ty,
             parameters,
             texture_type: None,
             phantom: PhantomData,
@@ -72,13 +70,12 @@ impl<T: ColorDepth> Texture<T> {
     }
 
     pub fn new_with_bytes(
-        ty: gl::types::GLenum,
         parameters: TextureParameters,
         bytes: &Vec<T>,
         width: u32,
         height: u32,
     ) -> Self {
-        let tex = Self::new(ty, parameters);
+        let tex = Self::new(parameters);
         tex.bind();
         tex.load_texture_from_bytes(bytes, width, height);
         tex.unbind();
@@ -87,20 +84,20 @@ impl<T: ColorDepth> Texture<T> {
 
     pub fn load_texture_from_bytes(&self, bytes: &Vec<T>, width: u32, height: u32) {
         unsafe {
-            gl::TexParameteri(self.unit, gl::TEXTURE_WRAP_S, self.parameters.wrap_s);
-            gl::TexParameteri(self.unit, gl::TEXTURE_WRAP_T, self.parameters.wrap_t);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, self.parameters.wrap_s);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, self.parameters.wrap_t);
             gl::TexParameteri(
-                self.unit,
+                gl::TEXTURE_2D,
                 gl::TEXTURE_MIN_FILTER,
                 self.parameters.min_filter,
             );
             gl::TexParameteri(
-                self.unit,
+                gl::TEXTURE_2D,
                 gl::TEXTURE_MAG_FILTER,
                 self.parameters.mag_filter,
             );
             gl::TexImage2D(
-                self.unit,
+                gl::TEXTURE_2D,
                 0,
                 gl::RGB as gl::types::GLint,
                 width as gl::types::GLsizei,
@@ -116,22 +113,21 @@ impl<T: ColorDepth> Texture<T> {
 }
 
 impl<T: ColorDepth> AbstractTexture for Texture<T> {
-    fn bind_to_texture_unit(&self, tex_unit: gl::types::GLenum) {
+    fn activate(&self, tex_unit: gl::types::GLenum) {
         unsafe {
             gl::ActiveTexture(tex_unit);
         }
-        self.bind();
     }
 
     fn bind(&self) {
         unsafe {
-            gl::BindTexture(self.unit, self.id);
+            gl::BindTexture(gl::TEXTURE_2D, self.id);
         }
     }
 
     fn unbind(&self) {
         unsafe {
-            gl::BindTexture(self.unit, 0);
+            gl::BindTexture(gl::TEXTURE_2D, 0);
         }
     }
 }
@@ -147,13 +143,7 @@ impl<T: ColorDepth> Drop for Texture<T> {
 pub fn get_texture_simple(path: &'static str) -> Texture<RGB8> {
     let (width, height, pixels) = utils::load_image_u8(path);
 
-    Texture::new_with_bytes(
-        gl::TEXTURE_2D,
-        TextureParameters::default(),
-        &pixels,
-        width,
-        height,
-    )
+    Texture::new_with_bytes(TextureParameters::default(), &pixels, width, height)
 }
 
 pub trait IntoTextureUnit {
@@ -162,39 +152,6 @@ pub trait IntoTextureUnit {
 
 impl IntoTextureUnit for usize {
     fn to_texture_unit(&self) -> gl::types::GLenum {
-        match &self {
-            0 => gl::TEXTURE0,
-            1 => gl::TEXTURE1,
-            2 => gl::TEXTURE2,
-            3 => gl::TEXTURE3,
-            4 => gl::TEXTURE4,
-            5 => gl::TEXTURE5,
-            6 => gl::TEXTURE6,
-            7 => gl::TEXTURE7,
-            8 => gl::TEXTURE8,
-            9 => gl::TEXTURE9,
-            10 => gl::TEXTURE10,
-            11 => gl::TEXTURE11,
-            12 => gl::TEXTURE12,
-            13 => gl::TEXTURE13,
-            14 => gl::TEXTURE14,
-            15 => gl::TEXTURE15,
-            16 => gl::TEXTURE16,
-            17 => gl::TEXTURE17,
-            18 => gl::TEXTURE18,
-            19 => gl::TEXTURE19,
-            20 => gl::TEXTURE20,
-            21 => gl::TEXTURE21,
-            22 => gl::TEXTURE22,
-            23 => gl::TEXTURE23,
-            24 => gl::TEXTURE24,
-            25 => gl::TEXTURE25,
-            26 => gl::TEXTURE26,
-            27 => gl::TEXTURE27,
-            28 => gl::TEXTURE28,
-            29 => gl::TEXTURE29,
-            30 => gl::TEXTURE30,
-            _ => panic!("Too many textures!"),
-        }
+        gl::TEXTURE0 + *self as u32
     }
 }

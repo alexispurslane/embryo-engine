@@ -87,10 +87,11 @@ pub fn main() {
         ));
         scene.update(dt as f32);
 
-        /*while lag <= UPDATE_INTERVAL {
+        while lag >= UPDATE_INTERVAL {
+            scene.queue_commands(systems::physics(&scene));
             scene.update(UPDATE_INTERVAL as f32);
             lag -= UPDATE_INTERVAL;
-        }*/
+        }
 
         // Render
         utils::clear_screen();

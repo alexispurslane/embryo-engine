@@ -10,7 +10,11 @@ pub fn create_whitespace_cstring(len: usize) -> CString {
 }
 
 pub fn load_image_u8(path: &str) -> (u32, u32, Vec<u8>) {
-    let tex = image::open(path).expect("Cannnot open texture 'container.jpg' for read");
+    let tex = image::open(path).expect(&format!(
+        "Cannnot open texture '{}' for read from working directory {}",
+        path,
+        std::env::current_dir().unwrap().to_string_lossy()
+    ));
     (
         tex.width(),
         tex.height(),

@@ -4,10 +4,7 @@ use crate::*;
 use entity::camera_component::CameraComponent;
 use entity::transform_component::TransformComponent;
 use entity::EntitySystem;
-use objects::Buffer;
-use rand::Rng;
-use render_gl::textures;
-use render_gl::{objects, shaders};
+use render_gl::shaders;
 use std::ffi::CString;
 
 pub fn add_camera(scene: &mut Scene) {
@@ -45,7 +42,7 @@ pub fn add_level(scene: &mut Scene) {
     let boxes = scene.entities.new_entity();
     scene.entities.add_component(
         boxes.id,
-        ModelComponent::from_file("./assets/levels/example_level1.blend".to_string()).unwrap(),
+        ModelComponent::from_file("./assets/entities/cube.glb".to_string()).unwrap(),
     );
 
     scene.entities.add_component(
@@ -78,13 +75,12 @@ pub fn render(scene: &Scene, width: u32, height: u32) {
     let camera_component = cc.as_ref().expect("Camera needs to have CameraComponent");
 
     let program = &scene.shader_programs[0];
+    program.set_used();
 
     for (_eid, rc, tc) in scene
         .entities
         .get_with_components(&has_renderable, &has_transform)
     {
-        program.set_used();
-
         program.set_uniform_matrix_4fv(
             &CString::new("view_matrix").unwrap(),
             &camera_transform.point_of_view(0).to_cols_array(),
@@ -96,4 +92,8 @@ pub fn render(scene: &Scene, width: u32, height: u32) {
 
         rc.render(tc.instances, &program);
     }
+}
+
+pub fn physics(scene: &Scene) -> Vec<SceneCommand> {
+    vec![]
 }

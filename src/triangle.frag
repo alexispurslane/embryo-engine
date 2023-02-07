@@ -7,9 +7,10 @@ in VS_OUT {
     vec2 texCoord;
 } fs_in;
 
+uniform sampler2D texture0;
 uniform sampler2D texture1;
 
 void main()
 {
-    FragColor = texture(texture1, fs_in.texCoord) + vec4(1.0, 1.0, 1.0, 1.0);
+    FragColor = mix(texture(texture1, fs_in.texCoord), texture(texture0, fs_in.texCoord), 0.5) + vec4(1.0, 1.0, 1.0, 0.5);
 }

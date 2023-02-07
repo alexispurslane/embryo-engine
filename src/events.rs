@@ -15,8 +15,8 @@ pub fn handle_keyboard(
             .fold(glam::Vec3::ZERO, |cm, scancode: Scancode| match scancode {
                 Scancode::W => cm + glam::Vec3::Z,
                 Scancode::S => cm - glam::Vec3::Z,
-                Scancode::A => cm + glam::Vec3::X,
-                Scancode::D => cm - glam::Vec3::X,
+                Scancode::A => cm - glam::Vec3::X,
+                Scancode::D => cm + glam::Vec3::X,
                 Scancode::E => cm - glam::Vec3::Y,
                 Scancode::F => cm + glam::Vec3::Y,
                 _ => cm,

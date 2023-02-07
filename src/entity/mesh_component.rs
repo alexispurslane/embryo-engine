@@ -9,7 +9,7 @@ use crate::render_gl::data;
 use crate::render_gl::textures::AbstractTexture;
 use crate::render_gl::{
     objects::{self, Buffer},
-    shaders::{self, Program},
+    shaders::Program,
     textures::{self, IntoTextureUnit, TextureParameters},
 };
 use crate::utils;
@@ -64,7 +64,6 @@ impl ModelComponent {
                             None
                         })
                 );
-                println!("  Textures: {}", material.textures.len());
                 material
                     .textures
                     .iter()
@@ -72,10 +71,17 @@ impl ModelComponent {
                     .filter_map(|(i, (_tex_ty, tex))| {
                         let tex = tex.clone();
                         let tex = tex.borrow();
+                        let bytes =
+                            utils::load_image_u8(&format!("assets/textures/{}.jpg", tex.filename))
+                                .2;
+                        println!(
+                            "    Texture {}: {}",
+                            i,
+                            format!("assets/textures/{}.jpg", tex.filename)
+                        );
                         let result = textures::Texture::new_with_bytes(
-                            (i as usize).to_texture_unit(),
                             TextureParameters::default(),
-                            &utils::load_image_u8(&format!("assets/textures/{}", tex.filename)).2,
+                            &bytes,
                             tex.width,
                             tex.height,
                         );
@@ -186,6 +192,7 @@ impl Mesh {
         textures: Vec<TextureID>,
         material_index: usize,
     ) -> Self {
+        println!("Mesh textures: {:?}", textures);
         Self {
             vao: objects::VertexArrayObject::new(),
             vbo,
@@ -203,12 +210,13 @@ impl Mesh {
     ) {
         self.vao.bind();
         for (texture_unit_for_material, texture_name) in self.textures.iter().enumerate() {
+            let texture = &textures[self.material_index][texture_unit_for_material];
+            texture.activate(texture_unit_for_material.to_texture_unit());
             program.set_uniform_1i(
                 &CString::new(texture_name.to_owned()).unwrap(),
                 texture_unit_for_material as i32,
             );
-            textures[self.material_index][texture_unit_for_material]
-                .bind_to_texture_unit(texture_unit_for_material.to_texture_unit());
+            texture.bind();
         }
 
         if let Some(ebo) = &self.ebo {

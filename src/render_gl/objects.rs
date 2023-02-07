@@ -64,6 +64,20 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
         }
         self.count = buffer.len();
     }
+
+    /// Overwrites a section of the vertex buffer at the given offset without
+    /// clearing the rest or resizing or changing the flag
+    pub fn update_data(&mut self, buffer: &[T], offset_in_ibo: usize) {
+        unsafe {
+            let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
+            gl::BufferSubData(
+                self.buffer_type,
+                offset_in_ibo as gl::types::GLsizeiptr,
+                buf_size,
+                buffer.as_ptr() as *const gl::types::GLvoid,
+            )
+        }
+    }
 }
 
 impl<T: data::Vertex> Buffer for VertexBufferObject<T> {
