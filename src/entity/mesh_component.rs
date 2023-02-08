@@ -71,9 +71,8 @@ impl ModelComponent {
                     .filter_map(|(i, (_tex_ty, tex))| {
                         let tex = tex.clone();
                         let tex = tex.borrow();
-                        let bytes =
-                            utils::load_image_u8(&format!("assets/textures/{}.jpg", tex.filename))
-                                .2;
+                        let (width, height, bytes) =
+                            utils::load_image_u8(&format!("assets/textures/{}.jpg", tex.filename));
                         println!(
                             "    Texture {}: {}",
                             i,
@@ -82,8 +81,8 @@ impl ModelComponent {
                         let result = textures::Texture::new_with_bytes(
                             TextureParameters::default(),
                             &bytes,
-                            tex.width,
-                            tex.height,
+                            width,
+                            height,
                         );
                         Some(Box::new(result) as Box<dyn AbstractTexture>)
                     })
