@@ -42,7 +42,7 @@ pub fn add_level(scene: &mut Scene) {
     let boxes = scene.entities.new_entity();
     scene.entities.add_component(
         boxes.id,
-        ModelComponent::from_file("./assets/levels/example_level1.glb".to_string()).unwrap(),
+        ModelComponent::from_file("./assets/entities/cube.glb".to_string()).unwrap(),
     );
 
     scene.entities.add_component(

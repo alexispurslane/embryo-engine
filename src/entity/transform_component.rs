@@ -100,7 +100,6 @@ impl TransformComponent {
         self.instance_transforms[idx].trans += rel_vec.z * direction
             + rel_vec.x * direction.cross(glam::Vec3::Y).normalize()
             + rel_vec.y * glam::Vec3::Y;
-        println!("{:?}", direction);
         self.dirty_matrices.insert(idx);
     }
 

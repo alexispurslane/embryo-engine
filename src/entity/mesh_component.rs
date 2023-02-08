@@ -100,7 +100,7 @@ impl ModelComponent {
         let mut node_meshes = node
             .meshes
             .iter()
-            .filter_map(|id| Self::process_mesh(ai_scene, &ai_scene.meshes[*id as usize]))
+            .map(|id| Self::process_mesh(ai_scene, &ai_scene.meshes[*id as usize]))
             .collect::<Vec<_>>();
         for child in node.children.iter() {
             let child = child.clone();
@@ -109,7 +109,7 @@ impl ModelComponent {
         node_meshes
     }
 
-    fn process_mesh(ai_scene: &russimp::scene::Scene, mesh: &russimp::mesh::Mesh) -> Option<Mesh> {
+    fn process_mesh(ai_scene: &russimp::scene::Scene, mesh: &russimp::mesh::Mesh) -> Mesh {
         let mut vertices = Vec::with_capacity(mesh.vertices.len());
 
         // Set up vertices
@@ -133,7 +133,7 @@ impl ModelComponent {
         );
         let vbo = objects::VertexBufferObject::new_with_vec(gl::ARRAY_BUFFER, &vertices);
         let ebo = objects::ElementBufferObject::new_with_vec(&indices);
-        Some(Mesh::new(
+        Mesh::new(
             Box::new(vbo),
             Some(ebo),
             (0..ai_scene.materials[mesh.material_index as usize]
@@ -142,7 +142,7 @@ impl ModelComponent {
                 .map(|i| format!("texture{}", i))
                 .collect(),
             mesh.material_index as usize,
-        ))
+        )
     }
 
     pub fn setup_mesh_components(
@@ -170,7 +170,7 @@ impl ModelComponent {
     }
 
     pub fn render(&self, instances: u32, program: &Program) {
-        for mesh in self.meshes.iter() {
+        for (i, mesh) in self.meshes.iter().enumerate() {
             mesh.render(instances, program, &self.material_textures);
         }
     }
@@ -191,7 +191,7 @@ impl Mesh {
         textures: Vec<TextureID>,
         material_index: usize,
     ) -> Self {
-        println!("Mesh textures: {:?}", textures);
+        println!("    Mesh Textures: {:?}\n", textures);
         Self {
             vao: objects::VertexArrayObject::new(),
             vbo,
