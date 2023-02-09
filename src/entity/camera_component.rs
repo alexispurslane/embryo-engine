@@ -14,7 +14,7 @@ impl CameraComponent {
             self.fov.to_radians(),
             width as f32 / height as f32,
             0.1,
-            100.0,
+            1000.0,
         )
     }
 }

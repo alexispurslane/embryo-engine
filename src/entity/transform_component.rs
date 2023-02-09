@@ -130,12 +130,12 @@ impl TransformComponent {
     pub fn point_of_view(&self, idx: usize) -> glam::Mat4 {
         let Transform { trans: pos, rot } = self.instance_transforms[idx];
         let direction = glam::vec3(
-            (-rot.y.to_radians()).cos() * (-rot.x.to_radians()).cos(),
-            (-rot.x.to_radians()).sin(),
-            (-rot.y.to_radians()).sin() * (-rot.x.to_radians()).cos(),
+            (rot.y.to_radians()).cos() * (rot.x.to_radians()).cos(),
+            (rot.x.to_radians()).sin(),
+            (rot.y.to_radians()).sin() * (rot.x.to_radians()).cos(),
         )
         .normalize();
         // We are *always* right side up, so we don't get the up vector
-        glam::Mat4::look_at_rh(-pos, -pos + direction, glam::Vec3::Y)
+        glam::Mat4::look_at_rh(pos, pos + direction, glam::Vec3::Y)
     }
 }
