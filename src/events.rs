@@ -1,7 +1,10 @@
 use crate::scene::*;
+use egui_sdl2_gl::painter::Painter;
+use egui_sdl2_gl::EguiStateHandler;
 use sdl2::event::Event;
 use sdl2::event::EventPollIterator;
 use sdl2::keyboard::{KeyboardState, Scancode};
+use sdl2::mouse::MouseUtil;
 use sdl2::mouse::RelativeMouseState;
 
 pub fn handle_keyboard(
@@ -30,12 +33,26 @@ pub fn handle_mouse(_scene: &Scene, mouse_state: &RelativeMouseState) -> Vec<Sce
     vec![SceneCommand::RotateCamera(glam::vec3(-yo, xo, 0.0))]
 }
 
-pub fn handle_window_events(_scene: &Scene, events: EventPollIterator) -> Vec<SceneCommand> {
+pub fn handle_window_events(
+    window: &mut sdl2::video::Window,
+    mouse_util: &mut MouseUtil,
+    egui_state: &mut EguiStateHandler,
+    painter: &mut Painter,
+    events: EventPollIterator,
+) -> Vec<SceneCommand> {
     let mut commands = Vec::<SceneCommand>::new();
     for event in events {
         match event {
             Event::Quit { .. } => commands.push(SceneCommand::Exit()),
-            _ => {}
+            Event::KeyDown {
+                scancode: Some(Scancode::Escape),
+                ..
+            } => {
+                mouse_util.set_relative_mouse_mode(!mouse_util.relative_mouse_mode());
+            }
+            _ => {
+                egui_state.process_input(window, event, painter);
+            }
         }
     }
     commands

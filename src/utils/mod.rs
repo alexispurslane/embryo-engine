@@ -1,5 +1,7 @@
 use std::ffi::CString;
 
+use sdl2::image::LoadSurface;
+
 pub type Degrees = f32;
 pub type Radians = f32;
 
@@ -10,16 +12,21 @@ pub fn create_whitespace_cstring(len: usize) -> CString {
 }
 
 pub fn load_image_u8(path: &str) -> (u32, u32, Vec<u8>) {
-    let tex = image::open(path).expect(&format!(
-        "Cannnot open texture '{}' for read from working directory {}",
-        path,
-        std::env::current_dir().unwrap().to_string_lossy()
-    ));
-    (
-        tex.width(),
-        tex.height(),
-        tex.flipv().into_rgb8().into_vec(),
-    )
+    let image_surface = sdl2::surface::Surface::from_file(path)
+        .expect(&format!(
+            "Cannnot open texture '{}' for read from working directory {}",
+            path,
+            std::env::current_dir().unwrap().to_string_lossy()
+        ))
+        .convert_format(sdl2::pixels::PixelFormatEnum::RGB24)
+        .unwrap();
+    image_surface.with_lock(|pixels| {
+        (
+            image_surface.width(),
+            image_surface.height(),
+            pixels.to_vec(),
+        )
+    })
 }
 
 pub fn clear_screen() {
