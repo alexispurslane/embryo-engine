@@ -1,3 +1,5 @@
+use rayon::prelude::{ParallelBridge, ParallelIterator};
+
 use crate::entity::camera_component::CameraComponent;
 use crate::entity::transform_component::TransformComponent;
 use crate::entity::{EntityID, EntitySystem};
@@ -66,15 +68,17 @@ impl Scene {
             }
         }
 
-        for (eid, tc) in self
-            .entities
+        self.entities
             .get_component_vec_mut::<TransformComponent>()
             .iter_mut()
+            .filter(|tc: &&mut Option<TransformComponent>| {
+                tc.as_ref()
+                    .map_or(false, |tc| !tc.dirty_matrices.is_empty())
+            })
             .enumerate()
-        {
-            if let Some(component) = tc {
-                component.flush_matrices();
-            }
-        }
+            .par_bridge()
+            .for_each(|(eid, tc)| {
+                tc.as_mut().unwrap().flush_matrices();
+            });
     }
 }

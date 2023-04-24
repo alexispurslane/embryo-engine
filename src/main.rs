@@ -122,9 +122,7 @@ pub fn main() {
         egui_ctx.begin_frame(egui_state.input.take());
 
         egui::TopBottomPanel::bottom("bottom_panel").show(&egui_ctx, |ui| {
-            ui.horizontal_top(|ui| {
-                ui.label("Hello world");
-            });
+            ui.label("Hello world");
         });
         let (egui_output, paint_cmds) = egui_ctx.end_frame();
         egui_state.process_output(&window, &egui_output);

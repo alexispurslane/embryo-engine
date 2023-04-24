@@ -29,12 +29,12 @@ impl Transform {
 
 #[derive(ComponentId)]
 pub struct TransformComponent {
-    instance_transforms: Vec<Transform>,
+    pub instance_transforms: Vec<Transform>,
     pub instance_matrices: Vec<glam::Mat4>,
     pub ibo: objects::VertexBufferObject<data::InstanceTransformVertex>,
     pub instances: u32,
     pub position_change_flag: gl::types::GLenum,
-    dirty_matrices: HashSet<usize>,
+    pub dirty_matrices: HashSet<usize>,
 }
 
 impl TransformComponent {
