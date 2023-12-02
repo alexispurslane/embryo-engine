@@ -1,38 +1,19 @@
 use crate::entity::mesh_component::{MeshNode, Model, ModelComponent};
-use crate::entity::{camera_component, transform_component, Entity};
+use crate::entity::Entity;
 use crate::render_gl::data::InstanceTransformVertex;
-use crate::render_gl::objects::{Buffer, VertexBufferObject};
+use crate::render_gl::objects::Buffer;
 use crate::render_gl::shaders::Program;
 use crate::*;
 use entity::camera_component::CameraComponent;
 use entity::transform_component::TransformComponent;
-use entity::EntitySystem;
-use gl::VertexBindingDivisor;
-use gltf::{Glb, Gltf};
 use rand::Rng;
-use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelExtend, ParallelIterator};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use render_gl::shaders;
 use ritelinked::LinkedHashSet;
-use std::collections::HashSet;
+use std::any::Any;
 use std::ffi::CString;
-use std::io::Read;
-use std::sync::mpsc::channel;
-
-pub fn add_camera(scene: &mut Scene) {
-    let e = scene.entities.new_entity();
-    scene.entities.add_component(
-        e,
-        TransformComponent::new_from_rot_trans(
-            glam::Vec3::Y,
-            glam::vec3(0.0, 0.0, -3.0),
-            gl::STREAM_DRAW,
-        ),
-    );
-    scene
-        .entities
-        .add_component(e, CameraComponent { fov: 90.0 });
-    scene.camera = Some(e);
-}
+use std::marker::PhantomData;
+use std::sync::mpsc::{channel, Sender};
 
 pub fn load_shaders(scene: &mut Scene) {
     let vert_shader = shaders::Shader::from_source(
@@ -52,6 +33,20 @@ pub fn load_shaders(scene: &mut Scene) {
 }
 
 pub fn load_entities(scene: &mut Scene) -> Vec<Entity> {
+    let e = scene.entities.new_entity();
+    scene.entities.add_component(
+        e,
+        TransformComponent::new_from_rot_trans(
+            glam::Vec3::Y,
+            glam::vec3(0.0, 0.0, -3.0),
+            gl::STREAM_DRAW,
+        ),
+    );
+    scene
+        .entities
+        .add_component(e, CameraComponent { fov: 90.0 });
+    scene.camera = Some(e);
+
     let mut trng = rand::thread_rng();
     let assets = [
         "./assets/entities/emily.glb",
@@ -81,116 +76,45 @@ pub fn load_entities(scene: &mut Scene) -> Vec<Entity> {
     entities
 }
 
-pub fn unload_entity_models(
-    entities: &EntitySystem,
-    new_entities: Vec<Entity>,
-    models: &mut HashMap<String, Model>,
-) {
+pub fn unload_entity_models(scene: &mut Scene, new_entities: &Vec<Entity>) {
     for entity in new_entities {
-        let model_component = entities.get_component::<ModelComponent>(entity).unwrap();
-        let model = models.get_mut(&model_component.path).unwrap();
-        model.entities.remove(&entity);
-        model.entities_dirty_flag = true;
-        if model.entities.is_empty() {
-            models.remove(&model_component.path);
+        let model_component = scene
+            .entities
+            .get_component::<ModelComponent>(*entity)
+            .unwrap();
+        if let Some(model) = scene.resource_manager.models.get_mut(&model_component.path) {
+            model.entities.remove(&entity);
+            model.entities_dirty_flag = true;
+            if model.entities.is_empty() {
+                scene.resource_manager.models.remove(&model_component.path);
+            }
         }
     }
 }
 
-pub fn load_entity_models(
-    entities: &EntitySystem,
-    new_entities: Vec<Entity>,
-    models: &mut HashMap<String, Model>,
-) {
-    let models_requested = new_entities.iter().fold(
-        HashMap::new(),
-        |mut registry: HashMap<String, LinkedHashSet<Entity>>, entity: &Entity| {
-            let mc = entities.get_component::<ModelComponent>(*entity);
-            let path = &mc
-                .as_ref()
-                .expect("Sent entity without a model component to model load system, invalid.")
-                .path;
-
-            if let Some(entry) = models.get_mut(path).map(|x| &mut x.entities) {
-                entry.insert(*entity);
-            } else {
-                if let Some(entry) = registry.get_mut(path) {
-                    entry.insert(*entity);
-                } else {
-                    let mut hs = LinkedHashSet::new();
-                    hs.insert(*entity);
-                    registry.insert(path.clone(), hs);
-                }
-            }
-            registry
-        },
-    );
-    let time = std::time::Instant::now();
-    let load_start_time = time.elapsed().as_millis();
-    let (sender, receiver) = channel();
-    models_requested.par_iter().for_each(|(path, entities)| {
-        let start_gltf_time = time.elapsed().as_millis();
-        let gltf = gltf::import(path).expect(&format!(
-            "Unable to interpret model file {} as glTF 2.0 file.",
-            path
-        ));
-        let end_gltf_time = time.elapsed().as_millis();
-        println!(
-            "GLTF loaded for {} in time {}ms",
-            path,
-            end_gltf_time - start_gltf_time
-        );
-
-        let start_process_time = time.elapsed().as_millis();
-        let mut model = Model::from_gltf(gltf).expect("Unable to load model");
-        model.entities.extend(entities);
-        let end_process_time = time.elapsed().as_millis();
-        println!(
-            "GLTF processed to native formats for {} in time {}ms",
-            path,
-            end_process_time - start_process_time
-        );
-
-        let _ = sender.send((path, model));
-    });
-    let load_end_time = time.elapsed().as_millis();
-    let new_models =
-        receiver
-            .try_iter()
-            .fold(HashMap::new(), |mut new_models, (path, mut model)| {
-                // We have to do the OpenGL setup all on the main thread
-                model.setup_model_gl();
-                new_models.insert(path.clone(), model);
-                println!("Loaded model: {}", path);
-                new_models
-            });
-    println!(
-        "Model loading complete in {}ms",
-        load_end_time - load_start_time
-    );
-    models.extend(new_models);
+pub fn load_entity_models(scene: &mut Scene, new_entities: &Vec<Entity>) {
+    scene
+        .resource_manager
+        .request_model_batch(&scene.entities, new_entities)
 }
 
-pub fn render(
-    camera: Option<Entity>,
-    entities: &mut EntitySystem,
-    shader_programs: &Vec<Program>,
-    models: &mut HashMap<String, Model>,
-    width: u32,
-    height: u32,
-) {
-    let mut last_shader_program_index = 0;
-    let mut program = &shader_programs[0];
-    program.set_used();
-    let camera_entity = camera.expect("No camera found");
-    utils::camera_prepare_shader(camera_entity, entities, program, width, height);
+pub fn integrate_loaded_models(scene: &mut Scene) {
+    scene.resource_manager.try_integrate_loaded_models();
+}
 
-    for (path, model) in models.iter_mut() {
+pub fn render(scene: &mut Scene, width: u32, height: u32) {
+    let mut last_shader_program_index = 0;
+    let mut program = &scene.shader_programs[0];
+    program.set_used();
+    let camera_entity = scene.camera.expect("No camera found");
+    utils::camera_prepare_shader(camera_entity, &scene.entities, program, width, height);
+
+    for (path, model) in scene.resource_manager.models.iter_mut() {
         if last_shader_program_index != model.shader_program {
-            program = &shader_programs[model.shader_program];
+            program = &scene.shader_programs[model.shader_program];
             last_shader_program_index = model.shader_program;
             program.set_used();
-            utils::camera_prepare_shader(camera_entity, entities, program, width, height);
+            utils::camera_prepare_shader(camera_entity, &scene.entities, program, width, height);
         }
         // if the total number of entities changed, we need to totally reinitialize the buffer
         if model.entities_dirty_flag {
@@ -198,7 +122,7 @@ pub fn render(
                 .entities
                 .iter()
                 .map(|entity| {
-                    entities
+                    scene.entities
                         .get_component::<TransformComponent>(*entity)
                         .expect("Tried to render model for an entity that either doesn't have a transform component, or has been recycled.")
                 })
@@ -214,7 +138,8 @@ pub fn render(
             let mut num = 0;
             // otherwise, we can just update what changed
             for (i, entity) in model.entities.iter().enumerate() {
-                let mut tc = entities
+                let mut tc = scene
+                    .entities
                     .get_component_mut::<TransformComponent>(*entity)
                     .expect("Entities must have a transform component to have a model.");
 

@@ -6,6 +6,10 @@ use std::{
 
 use egui::ahash::HashSet;
 
+use crate::systems;
+
+use self::mesh_component::ModelComponent;
+
 pub mod camera_component;
 pub mod mesh_component;
 pub mod transform_component;
@@ -125,15 +129,17 @@ impl EntitySystem {
         }
     }
 
-    pub fn remove_component<T: Component + 'static>(&mut self, entity: Entity) {
+    // Returns true if an asset unload cycle is needed after deleting this component
+    pub fn remove_component<T: Component + 'static>(&mut self, entity: Entity) -> bool {
         if entity.generation != self.current_entity_generations[&entity.id] {
             println!("WARNING: Tried to use recycled entity ID to refer to old entity");
-            return;
+            return false;
         }
 
         if let Some(component_vec) = self.components.get_mut(&T::get_id()) {
             component_vec.remove_entity_col(entity.id);
         }
+        T::get_id() == ModelComponent::get_id()
     }
 
     pub fn get_component<T: Component + 'static>(&self, entity: Entity) -> Option<Ref<T>> {

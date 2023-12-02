@@ -7,7 +7,9 @@ use crate::entity::camera_component::CameraComponent;
 use crate::entity::mesh_component::Model;
 use crate::entity::transform_component::TransformComponent;
 use crate::entity::{Entity, EntitySystem};
+use crate::render_gl::resources::ResourceManager;
 use crate::render_gl::shaders::Program;
+use crate::UPDATE_INTERVAL;
 
 const MOUSE_SENSITIVITY: f32 = 10.0;
 const MOTION_SPEED: f32 = 10.0;
@@ -27,8 +29,17 @@ pub struct Scene {
     pub running: bool,
     pub entities: EntitySystem,
     pub shader_programs: Vec<Program>,
-    pub models: HashMap<String, Model>,
+    pub resource_manager: ResourceManager,
 }
+// NOTE: Same logic as for the Send implementation for Model: I will never be
+// sending this anywhere where OpenGL functions will be called, since the
+// rendering happens only on the main thread, and the update thread only
+// receives this object as immutable, and accessing scene properties can never
+// call any OpenGL functions because accessing is completely passive. So the one
+// thing that makes it thread-unsafe, the Vertex Buffer Objects having OpenGL
+// code in their methods, is fine.
+unsafe impl Send for Scene {}
+unsafe impl Sync for Scene {}
 
 impl Scene {
     /// Queue world state changes
@@ -37,7 +48,7 @@ impl Scene {
     }
 
     /// Apply queued world state changes to the world state
-    pub fn update(&mut self, dt: f32) {
+    pub fn update(&mut self) {
         // Update world state
         while let Some(command) = self.command_queue.pop() {
             match command {
@@ -48,7 +59,8 @@ impl Scene {
                         .get_component_mut::<TransformComponent>(camera_entity)
                         .expect("Camera needs to have TransformComponent");
 
-                    camera_transform.displace_by(d * MOTION_SPEED * (dt / 1000.0));
+                    camera_transform
+                        .displace_by(d * MOTION_SPEED * (UPDATE_INTERVAL as f32 / 1000.0));
                 }
                 SceneCommand::RotateCamera(pyr) => {
                     let camera_entity = self.camera.expect("No camera found");
@@ -57,7 +69,8 @@ impl Scene {
                         .get_component_mut::<TransformComponent>(camera_entity)
                         .expect("Camera needs to have TransformComponent");
 
-                    camera_transform.rotate(pyr * MOUSE_SENSITIVITY * dt / 1000.0);
+                    camera_transform
+                        .rotate(pyr * MOUSE_SENSITIVITY * UPDATE_INTERVAL as f32 / 1000.0);
                 }
                 SceneCommand::DisplaceEntity(eid, rel_vec) => {
                     self.entities.get_component_vec_mut::<TransformComponent>()[eid]

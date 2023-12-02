@@ -11,9 +11,10 @@ extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 use egui::FullOutput;
 use egui_backend::ShaderVersion;
 use egui_sdl2_gl::{self as egui_backend};
-use entity::EntitySystem;
+use entity::{mesh_component::Model, EntitySystem};
+use render_gl::resources::ResourceManager;
 use scene::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::mpsc::channel};
 
 mod entity;
 mod events;
@@ -64,19 +65,20 @@ pub fn main() {
 
     ///////// Initalize game
 
+    let available_hwthreads = std::thread::available_parallelism().unwrap().get();
     let mut scene = Scene {
         camera: None,
         command_queue: vec![],
         running: true,
         entities: EntitySystem::new(),
         shader_programs: vec![],
-        models: HashMap::new(),
+        resource_manager: ResourceManager::new(available_hwthreads / 4),
     };
 
-    systems::add_camera(&mut scene);
     systems::load_shaders(&mut scene);
     let new_entities = systems::load_entities(&mut scene);
-    systems::load_entity_models(&scene.entities, new_entities, &mut scene.models);
+    systems::unload_entity_models(&mut scene, &new_entities);
+    systems::load_entity_models(&mut scene, &new_entities);
 
     ///////// Game loop
 
@@ -114,26 +116,21 @@ pub fn main() {
             &scene,
             &event_pump.relative_mouse_state(),
         ));
-        scene.update(dt as f32);
+        scene.update();
 
         while lag >= UPDATE_INTERVAL {
             scene.queue_commands(systems::physics(&scene));
-            scene.update(UPDATE_INTERVAL as f32);
+            scene.update();
             lag -= UPDATE_INTERVAL;
         }
 
         // Render world
         utils::clear_screen();
 
+        systems::integrate_loaded_models(&mut scene);
+
         let (width, height) = window.size();
-        systems::render(
-            scene.camera,
-            &mut scene.entities,
-            &scene.shader_programs,
-            &mut scene.models,
-            width,
-            height,
-        );
+        systems::render(&mut scene, width, height);
 
         // Render ui
         egui_ctx.begin_frame(egui_state.input.take());
