@@ -2,8 +2,8 @@ extern crate egui;
 extern crate egui_sdl2_gl;
 extern crate gl;
 extern crate glam;
+extern crate gltf;
 extern crate rayon;
-extern crate russimp;
 extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
@@ -62,7 +62,7 @@ pub fn main() {
 
     let mut egui_ctx = egui::Context::default();
 
-    ///////// Iniitalize game
+    ///////// Initalize game
 
     let mut scene = Scene {
         camera: None,
@@ -74,8 +74,9 @@ pub fn main() {
     };
 
     systems::add_camera(&mut scene);
-    systems::add_level(&mut scene);
-    systems::load_entity_models(&scene.entities, &mut scene.models);
+    systems::load_shaders(&mut scene);
+    let new_entities = systems::load_entities(&mut scene);
+    systems::load_entity_models(&scene.entities, new_entities, &mut scene.models);
 
     ///////// Game loop
 

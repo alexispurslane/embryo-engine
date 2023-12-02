@@ -1,11 +1,18 @@
+use crate::rayon::iter::ParallelIterator;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::rc::Rc;
+use std::thread::{self, Thread};
 
-use russimp::node::Node;
+use gltf::Gltf;
+use image::GenericImageView;
+use rayon::prelude::ParallelBridge;
+use ritelinked::LinkedHashSet;
 
 use crate::entity::{Component, ComponentID};
-use crate::render_gl::data::{self, Cvec4, InstanceTransformVertex, VertexNormTex};
+use crate::render_gl::data::{
+    self, Cvec2, Cvec3, Cvec4, InstanceTransformVertex, VertexNormTex, VertexNormTexTan,
+};
 use crate::render_gl::objects::VertexBufferObject;
 use crate::render_gl::textures::{AbstractTexture, Texture, RGB8};
 use crate::render_gl::{
@@ -13,235 +20,325 @@ use crate::render_gl::{
     shaders::Program,
     textures::{self, IntoTextureUnit, TextureParameters},
 };
-use crate::utils;
+use crate::utils::zip;
 
-use super::EntityID;
+use super::Entity;
 
 type TextureID = usize;
 
 #[derive(Debug)]
 enum FactorOrTexture {
     Factor(f32),
-    VecFactor(Cvec4),
+    Vec3([f32; 3]),
+    Vec4([f32; 4]),
     Texture(TextureID),
 }
 
 pub struct Material {
     name: String,
-    base_color: FactorOrTexture,
+    diffuse: FactorOrTexture,
+    // specular and glossiness actually share a texture when they have a
+    // texture, but since we're just storing IDs here it doesn't matter
+    specular: FactorOrTexture,
+    glossiness: FactorOrTexture,
     normal: Option<TextureID>,
-    metalness: FactorOrTexture,
-    roughness: FactorOrTexture,
-    ambient_occlusion: Option<TextureID>,
 }
 
 impl Material {
     pub fn activate(&self, model: &Model, shader_program: &Program) {
         use FactorOrTexture::*;
 
-        match self.base_color {
+        match self.diffuse {
             Texture(tex) => {
-                let texture = &model.textures[tex];
+                let texture = &model.textures.as_ref().expect("Cannot activate a material in the shader if that material and associated model have not had their OpenGL things set up.")[tex];
                 texture.activate((0 as usize).to_texture_unit());
                 texture.bind();
+                shader_program.set_uniform_1i(&CString::new("material.diffuseTexture").unwrap(), 0);
                 shader_program
-                    .set_uniform_1i(&CString::new("material.baseColorTexture").unwrap(), 0);
-                shader_program.set_uniform_1b(&CString::new("material.hasTexture").unwrap(), true);
+                    .set_uniform_1b(&CString::new("material.diffuseIsTexture").unwrap(), true);
             }
-            VecFactor(vec) => {
+            Vec4(vec) => {
                 shader_program.set_uniform_4f(
-                    &CString::new("material.baseColorFactor").unwrap(),
-                    vec.d0,
-                    vec.d1,
-                    vec.d2,
-                    vec.d3,
+                    &CString::new("material.diffuseFactor").unwrap(),
+                    vec[0],
+                    vec[1],
+                    vec[2],
+                    vec[3],
                 );
-                shader_program.set_uniform_1b(&CString::new("material.hasTexture").unwrap(), false);
+                shader_program
+                    .set_uniform_1b(&CString::new("material.diffuseIsTexture").unwrap(), false);
             }
             _ => {
-                println!("Should never get base color value: {:?}", self.base_color);
+                println!("Should never get base color value: {:?}", self.diffuse);
                 unreachable!()
             }
         }
     }
 }
 
-pub struct Model {
-    pub meshes: Vec<Mesh>,
-    pub textures: Vec<Box<dyn AbstractTexture>>,
-    pub materials: Vec<Material>,
-    pub entities: Vec<EntityID>,
-    pub ibo: VertexBufferObject<InstanceTransformVertex>,
-    pub entities_dirty_flag: bool,
+pub struct MeshNode {
+    pub name: String,
+    pub primitives: Vec<Mesh>,
+    pub children: Vec<Box<MeshNode>>,
 }
 
-impl Model {
-    pub fn from_ai_scene(ai_scene: russimp::scene::Scene) -> Result<Self, String> {
-        let ibo = VertexBufferObject::new(gl::ARRAY_BUFFER);
-
-        let meshes = ai_scene
-            .meshes
-            .iter()
-            .map(|mesh| Self::process_mesh(&ai_scene, &ibo, mesh))
-            .collect::<Vec<Mesh>>();
-
-        let mut texture_ids = HashMap::new();
-        let mut textures: Vec<Box<dyn AbstractTexture>> = vec![];
-        let mut materials = vec![];
-
-        for material in ai_scene.materials {
-            let mut material_textures = HashMap::new();
-            for (texture_type, texture) in &material.textures {
-                let texture = texture.borrow();
-                if !texture_ids.contains_key(&texture.filename) {
-                    textures.push(Box::new(Self::process_texture(&texture)));
-                    texture_ids.insert(texture.filename.clone(), textures.len() - 1);
-                }
-                material_textures.insert(texture_type, texture_ids[&texture.filename]);
-            }
-
-            let base_color = material_textures
-                .get(&russimp::material::TextureType::BaseColor)
-                .map(|x| FactorOrTexture::Texture(*x))
-                .or(
-                    utils::material_get_property(&material, "$clr.base").and_then(|t| match t {
-                        russimp::material::PropertyTypeInfo::FloatArray(array) => {
-                            if array.len() == 4 {
-                                Some(FactorOrTexture::VecFactor(Cvec4::new(
-                                    array[0], array[1], array[2], array[3],
-                                )))
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    }),
-                )
-                .unwrap_or(FactorOrTexture::VecFactor(Cvec4::new(0.75, 0.0, 1.0, 1.0)));
-
-            let normal = material_textures
-                .get(&russimp::material::TextureType::Normals)
-                .map(|x| *x);
-
-            let metalness = material_textures
-                .get(&russimp::material::TextureType::Metalness)
-                .map(|x| FactorOrTexture::Texture(*x))
-                .or(
-                    utils::material_get_property(&material, "$mat.metallicFactor").and_then(|t| {
-                        match t {
-                            russimp::material::PropertyTypeInfo::FloatArray(array) => {
-                                if array.len() == 1 {
-                                    Some(FactorOrTexture::Factor(array[0]))
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }),
-                )
-                .unwrap_or(FactorOrTexture::Factor(0.5));
-
-            let roughness = material_textures
-                .get(&russimp::material::TextureType::Roughness)
-                .map(|x| FactorOrTexture::Texture(*x))
-                .or(
-                    utils::material_get_property(&material, "$mat.roughnessFactor").and_then(|t| {
-                        match t {
-                            russimp::material::PropertyTypeInfo::FloatArray(array) => {
-                                if array.len() == 1 {
-                                    Some(FactorOrTexture::Factor(array[0]))
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }),
-                )
-                .unwrap_or(FactorOrTexture::Factor(0.5));
-
-            let ambient_occlusion = material_textures
-                .get(&russimp::material::TextureType::AmbientOcclusion)
-                .map(|x| *x);
-
-            materials.push(Material {
-                name: "unknown".to_string(),
-                base_color,
-                normal,
-                metalness,
-                roughness,
-                ambient_occlusion,
-            })
+impl MeshNode {
+    pub fn setup_mesh_gl(&mut self, ibo: &VertexBufferObject<InstanceTransformVertex>) {
+        for primitive in self.primitives.iter_mut() {
+            primitive.gl = Some(MeshGl::setup_mesh_gl(&primitive, &ibo));
         }
+        for child in self.children.iter_mut() {
+            child.setup_mesh_gl(ibo);
+        }
+    }
+}
 
-        Ok(Self {
+pub struct Model {
+    pub meshes: Vec<MeshNode>,
+    pub textures_raw: Vec<(Vec<u8>, u32, u32)>,
+    pub materials: Vec<Material>,
+
+    pub entities: LinkedHashSet<Entity>,
+
+    pub entities_dirty_flag: bool,
+    pub shader_program: usize,
+
+    pub textures: Option<Vec<Box<dyn AbstractTexture>>>,
+    pub ibo: Option<VertexBufferObject<InstanceTransformVertex>>,
+}
+/// NOTE: Textures and Buffers aren't safe to Send usually, because they require
+/// OpenGL calls to construct/manipulate, but I won't actually be constructing
+/// or manipulating those properties on another thread, they'll be set to None
+/// when I'm on another thread, and then populated when we get home. We
+/// dynamically check this at runtime to at least have some guarantees.
+unsafe impl Send for Model {}
+
+impl Model {
+    pub fn from_gltf(
+        (document, buffers, images): (
+            gltf::Document,
+            Vec<gltf::buffer::Data>,
+            Vec<gltf::image::Data>,
+        ),
+    ) -> Option<Self> {
+        let time = std::time::Instant::now();
+
+        let mat_start = time.elapsed().as_millis();
+        let materials = document
+            .materials()
+            .map(|m| Self::process_material(m))
+            .collect::<Vec<Material>>();
+        let mat_end = time.elapsed().as_millis();
+
+        let mesh_start = time.elapsed().as_millis();
+        let meshes = document
+            .nodes()
+            .filter_map(|n| Self::process_node(n, &buffers))
+            .collect::<Vec<MeshNode>>();
+        let mesh_end = time.elapsed().as_millis();
+
+        let textures_start = time.elapsed().as_millis();
+        let textures_raw = document
+            .textures()
+            .map(|t| Self::process_texture(t, &images))
+            .collect::<Vec<(Vec<u8>, u32, u32)>>();
+        let textures_end = time.elapsed().as_millis();
+
+        println!("Model processing times: ");
+        println!("    material processing done in {}ms", mat_end - mat_start);
+        println!("    mesh processing done in {}ms", mesh_end - mesh_start);
+        println!(
+            "    texture processing done in {}ms",
+            textures_end - textures_start
+        );
+
+        Some(Model {
             meshes,
-            textures,
+            textures_raw,
             materials,
-            ibo: ibo,
-            entities: vec![],
+
+            entities: LinkedHashSet::new(),
+
             entities_dirty_flag: true,
+            shader_program: 0,
+
+            textures: None,
+            ibo: None,
         })
     }
 
-    fn process_texture(texture: &russimp::material::Texture) -> Texture<RGB8> {
-        let (width, height, bytes) =
-            utils::load_image_u8(&format!("assets/textures/{}.jpg", texture.filename));
-        Texture::new_with_bytes(TextureParameters::default(), &bytes, width, height)
-    }
+    fn process_node(n: gltf::Node, buffers: &Vec<gltf::buffer::Data>) -> Option<MeshNode> {
+        let time = std::time::Instant::now();
 
-    fn process_mesh(
-        ai_scene: &russimp::scene::Scene,
-        ibo: &VertexBufferObject<InstanceTransformVertex>,
-        mesh: &russimp::mesh::Mesh,
-    ) -> Mesh {
-        let mut vertices = Vec::with_capacity(mesh.vertices.len());
+        let prim_start = time.elapsed().as_millis();
+        let primitives = n
+            .mesh()?
+            .primitives()
+            .map(|prim| {
+                let reader = prim.reader(|b| buffers.get(b.index()).map(|x| &*x.0));
 
-        // Set up vertices
-        for i in 0..mesh.vertices.len() {
-            let v = mesh.vertices[i];
-            let n = mesh.normals[i];
-            let t = mesh.texture_coords[0].as_ref().map(|x| x[i]).unwrap();
-            vertices.push(data::VertexNormTex {
-                pos: (v.x, v.y, v.z).into(),
-                norm: (n.x, n.y, n.z).into(),
-                tex: (t.x, t.y).into(),
-            });
-        }
-
-        let indices: Vec<u32> = mesh.faces.iter().flat_map(|face| face.0.clone()).collect();
+                let vert_start = time.elapsed().as_millis();
+                let vertices = {
+                    let positions = reader.read_positions();
+                    let normals = reader.read_normals();
+                    let tangents = reader.read_tangents();
+                    let texcoords = reader.read_tex_coords(0).unwrap().into_f32();
+                    zip!(
+                        positions.expect(&format!(
+                            "Vertices in node {} are missing positions!",
+                            n.name().unwrap()
+                        )),
+                        normals.expect(&format!(
+                            "Vertices in node {} are missing normals!",
+                            n.name().unwrap()
+                        )),
+                        tangents.expect(&format!(
+                            "Vertices in node {} are missing tangents!",
+                            n.name().unwrap()
+                        )),
+                        texcoords
+                    )
+                    .map(|(pos, (norm, (tan, tex)))| VertexNormTexTan {
+                        pos: Cvec3::new(pos[0], pos[1], pos[2]),
+                        norm: Cvec3::new(norm[0], norm[1], norm[2]),
+                        tex: Cvec2::new(tex[0], tex[1]),
+                        tan: Cvec4::new(tan[0], tan[1], tan[2], tan[3]),
+                    })
+                    .collect::<Vec<VertexNormTexTan>>()
+                };
+                let vert_end = time.elapsed().as_millis();
+                println!(
+                    "      processing this primitive's vertices took {}ms",
+                    vert_end - vert_start
+                );
+                let indices = reader.read_indices().unwrap().into_u32().collect();
+                let material_index = prim.material().index().unwrap();
+                let bounding_box = prim.bounding_box();
+                Mesh {
+                    vertices,
+                    indices,
+                    material_index,
+                    bounding_box,
+                    gl: None,
+                }
+            })
+            .collect();
+        let prim_end = time.elapsed().as_millis();
 
         println!(
-            "    Mesh Vertices: {}, Indices: {}",
-            vertices.len(),
-            indices.len()
+            "    node {}'s primitives took {}ms to process",
+            n.name().unwrap(),
+            prim_end - prim_start
         );
 
-        Mesh::new(&vertices, &indices, &ibo, mesh.material_index as usize)
+        let child_start = time.elapsed().as_millis();
+        let children = n
+            .children()
+            .filter_map(|n| Self::process_node(n, &buffers).map(|x| Box::new(x)))
+            .collect();
+        let child_end = time.elapsed().as_millis();
+
+        println!(
+            "    node {}'s children took {}ms to process",
+            n.name().unwrap(),
+            child_end - child_start
+        );
+        println!("");
+
+        Some(MeshNode {
+            name: n.name().unwrap_or("UnknownMesh").to_string(),
+            primitives,
+            children,
+        })
+    }
+
+    fn process_material(m: gltf::Material) -> Material {
+        let pbr = m.pbr_metallic_roughness();
+        Material {
+            name: m.name().unwrap_or("UnknownMaterial").to_string(),
+            diffuse: pbr
+                .base_color_texture()
+                .map_or(FactorOrTexture::Vec4(pbr.base_color_factor()), |info| {
+                    FactorOrTexture::Texture(info.texture().index())
+                }),
+            specular: FactorOrTexture::Vec3([0.5, 0.5, 0.5]),
+            glossiness: FactorOrTexture::Factor(0.5),
+            normal: None,
+        }
+        /*
+        let phong = m.pbr_specular_glossiness().expect(&format!(
+            "Did you export your gltf without specular glossiness for material {}?",
+            m.name().unwrap()
+        ));
+        Material {
+            name: m.name().unwrap_or("UnknownMaterial").to_string(),
+            diffuse: phong
+                .diffuse_texture()
+                .map_or(FactorOrTexture::Vec4(phong.diffuse_factor()), |info| {
+                    FactorOrTexture::Texture(info.texture().index())
+                }),
+            specular: phong
+                .specular_glossiness_texture()
+                .map_or(FactorOrTexture::Vec3(phong.specular_factor()), |info| {
+                    FactorOrTexture::Texture(info.texture().index())
+                }),
+            glossiness: phong
+                .specular_glossiness_texture()
+                .map_or(FactorOrTexture::Factor(phong.glossiness_factor()), |info| {
+                    FactorOrTexture::Texture(info.texture().index())
+                }),
+            normal: m.normal_texture().map(|t| t.texture().index()),
+        }*/
+    }
+
+    pub fn process_texture(
+        t: gltf::Texture,
+        images: &Vec<gltf::image::Data>,
+    ) -> (Vec<u8>, u32, u32) {
+        let image = images
+            .get(t.source().index())
+            .expect(&format!("No image for texture: {:?}", t.name()));
+        (image.pixels.clone(), image.width, image.height)
+    }
+
+    pub fn setup_model_gl(&mut self) {
+        if !thread::current().name().is_some_and(|x| x.contains("main")) {
+            panic!("Called OpenGL setup function on model while not on main thread: this is undefined behavior!");
+        }
+        self.ibo = Some(VertexBufferObject::new(gl::ARRAY_BUFFER));
+        self.textures = Some(
+            self.textures_raw
+                .iter()
+                .map(|(bytes, width, height)| {
+                    Box::new(Texture::new_with_bytes(
+                        TextureParameters::default(),
+                        bytes,
+                        *width,
+                        *height,
+                    )) as Box<dyn AbstractTexture>
+                })
+                .collect::<Vec<Box<dyn AbstractTexture>>>(),
+        );
+        for mesh_node in self.meshes.iter_mut() {
+            mesh_node.setup_mesh_gl(self.ibo.as_ref().unwrap());
+        }
     }
 }
 
-pub struct Mesh {
+pub struct MeshGl {
     pub vao: objects::VertexArrayObject,
     pub vbo: Box<dyn objects::Buffer>,
     pub ebo: objects::ElementBufferObject,
-    pub material_index: usize,
 }
 
-impl Mesh {
-    pub fn new(
-        vertices: &Vec<VertexNormTex>,
-        indices: &Vec<u32>,
-        ibo: &VertexBufferObject<InstanceTransformVertex>,
-        material_index: usize,
-    ) -> Self {
+impl MeshGl {
+    pub fn setup_mesh_gl(mesh: &Mesh, ibo: &VertexBufferObject<InstanceTransformVertex>) -> Self {
         let vao = objects::VertexArrayObject::new();
         let vbo = Box::new(objects::VertexBufferObject::new_with_vec(
             gl::ARRAY_BUFFER,
-            vertices,
+            &mesh.vertices,
         ));
-        let ebo = objects::ElementBufferObject::new_with_vec(&indices);
+        let ebo = objects::ElementBufferObject::new_with_vec(&mesh.indices);
 
         vao.bind();
 
@@ -255,11 +352,33 @@ impl Mesh {
 
         vao.unbind();
 
-        Mesh {
-            vao,
-            vbo,
-            ebo,
+        MeshGl { vao, vbo, ebo }
+    }
+}
+
+pub struct Mesh {
+    vertices: Vec<VertexNormTexTan>,
+    indices: Vec<u32>,
+    pub gl: Option<MeshGl>,
+    pub material_index: usize,
+    pub bounding_box: gltf::mesh::BoundingBox,
+}
+// NOTE: same reasoning as for Model above.
+unsafe impl Send for Mesh {}
+
+impl Mesh {
+    pub fn new(
+        vertices: Vec<VertexNormTexTan>,
+        indices: Vec<u32>,
+        material_index: usize,
+        bounding_box: gltf::mesh::BoundingBox,
+    ) -> Self {
+        Self {
+            vertices,
+            indices,
             material_index,
+            bounding_box,
+            gl: None,
         }
     }
 }
@@ -267,4 +386,5 @@ impl Mesh {
 #[derive(ComponentId)]
 pub struct ModelComponent {
     pub path: String,
+    pub shader_program: usize,
 }

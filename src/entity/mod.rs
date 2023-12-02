@@ -17,7 +17,7 @@ pub trait Component {
     fn get_id() -> ComponentID;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Entity {
     pub id: EntityID,
     pub generation: usize,
@@ -87,7 +87,6 @@ impl EntitySystem {
                 generation: self.current_generation,
             }
         };
-        self.current_generation += 1;
         self.current_entity_generations.insert(e.id, e.generation);
         e
     }
@@ -148,6 +147,34 @@ impl EntitySystem {
         });
         if val.is_some() {
             Some(Ref::map(val, |x| x.as_ref().unwrap()))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_component_mut<T: Component + 'static>(&self, entity: Entity) -> Option<RefMut<T>> {
+        if entity.generation != self.current_entity_generations[&entity.id] {
+            println!("WARNING: Tried to use recycled entity ID to refer to old entity in a situation where a result is required");
+            return None;
+        }
+
+        let val = RefMut::map(
+            self.get_component_vec_mut::<T>(),
+            |vec: &mut Vec<Option<T>>| &mut vec[entity.id],
+        );
+        if val.is_some() {
+            Some(RefMut::map(val, |x| x.as_mut().unwrap()))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_current_entity_from_id(&self, eid: EntityID) -> Option<Entity> {
+        if !self.free_entities.contains(&eid) {
+            self.current_entity_generations.get(&eid).map(|gen| Entity {
+                id: eid,
+                generation: *gen,
+            })
         } else {
             None
         }

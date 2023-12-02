@@ -129,16 +129,16 @@ pub struct InstanceLocationVertex {
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct InstanceTransformVertex {
-    #[location = 3]
-    #[divisor = 1]
-    pub d0: Cvec4,
     #[location = 4]
     #[divisor = 1]
-    pub d1: Cvec4,
+    pub d0: Cvec4,
     #[location = 5]
     #[divisor = 1]
-    pub d2: Cvec4,
+    pub d1: Cvec4,
     #[location = 6]
+    #[divisor = 1]
+    pub d2: Cvec4,
+    #[location = 7]
     #[divisor = 1]
     pub d3: Cvec4,
 }
@@ -192,4 +192,17 @@ pub struct VertexNormTex {
     pub norm: Cvec3,
     #[location = 2]
     pub tex: Cvec2,
+}
+
+#[derive(VertexAttribPointers, Copy, Clone, Debug)]
+#[repr(C, packed)]
+pub struct VertexNormTexTan {
+    #[location = 0]
+    pub pos: Cvec3,
+    #[location = 1]
+    pub norm: Cvec3,
+    #[location = 2]
+    pub tex: Cvec2,
+    #[location = 3]
+    pub tan: Cvec4,
 }

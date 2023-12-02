@@ -51,7 +51,6 @@ pub trait AbstractTexture {
 pub struct Texture<T: ColorDepth> {
     pub id: gl::types::GLuint,
     pub parameters: TextureParameters,
-    pub texture_type: Option<russimp::material::TextureType>,
     phantom: PhantomData<T>,
 }
 
@@ -64,7 +63,6 @@ impl<T: ColorDepth> Texture<T> {
         Self {
             id: texture,
             parameters,
-            texture_type: None,
             phantom: PhantomData,
         }
     }

@@ -1,3 +1,4 @@
+use std::cell::RefMut;
 use std::collections::HashMap;
 
 use rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -5,7 +6,7 @@ use rayon::prelude::{ParallelBridge, ParallelIterator};
 use crate::entity::camera_component::CameraComponent;
 use crate::entity::mesh_component::Model;
 use crate::entity::transform_component::TransformComponent;
-use crate::entity::{EntityID, EntitySystem};
+use crate::entity::{Entity, EntitySystem};
 use crate::render_gl::shaders::Program;
 
 const MOUSE_SENSITIVITY: f32 = 10.0;
@@ -21,7 +22,7 @@ pub enum SceneCommand {
 }
 
 pub struct Scene {
-    pub camera: Option<EntityID>,
+    pub camera: Option<Entity>,
     pub command_queue: Vec<SceneCommand>,
     pub running: bool,
     pub entities: EntitySystem,
@@ -41,21 +42,19 @@ impl Scene {
         while let Some(command) = self.command_queue.pop() {
             match command {
                 SceneCommand::MoveCameraInDirection(d) => {
-                    let camera_eid = self.camera.expect("No camera found");
-                    let ct = &mut self.entities.get_component_vec_mut::<TransformComponent>()
-                        [camera_eid];
-                    let camera_transform = ct
-                        .as_mut()
+                    let camera_entity = self.camera.expect("No camera found");
+                    let mut camera_transform = self
+                        .entities
+                        .get_component_mut::<TransformComponent>(camera_entity)
                         .expect("Camera needs to have TransformComponent");
 
                     camera_transform.displace_by(d * MOTION_SPEED * (dt / 1000.0));
                 }
                 SceneCommand::RotateCamera(pyr) => {
-                    let camera_eid = self.camera.expect("No camera found");
-                    let ct = &mut self.entities.get_component_vec_mut::<TransformComponent>()
-                        [camera_eid];
-                    let camera_transform = ct
-                        .as_mut()
+                    let camera_entity = self.camera.expect("No camera found");
+                    let mut camera_transform = self
+                        .entities
+                        .get_component_mut::<TransformComponent>(camera_entity)
                         .expect("Camera needs to have TransformComponent");
 
                     camera_transform.rotate(pyr * MOUSE_SENSITIVITY * dt / 1000.0);

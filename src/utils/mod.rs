@@ -1,6 +1,16 @@
-use std::ffi::CString;
+use std::{cell::RefMut, ffi::CString};
 
 use sdl2::image::LoadSurface;
+use std::cell::Ref;
+
+use crate::{
+    entity::{
+        camera_component::CameraComponent,
+        transform_component::{self, TransformComponent},
+        Entity, EntitySystem,
+    },
+    render_gl::shaders::Program,
+};
 
 pub type Degrees = f32;
 pub type Radians = f32;
@@ -196,15 +206,35 @@ pub mod shapes {
     }
 }
 
-pub fn material_get_property(
-    material: &russimp::material::Material,
-    name: &'static str,
-) -> Option<russimp::material::PropertyTypeInfo> {
-    material.properties.iter().find_map(|matprop| {
-        if matprop.key == name {
-            Some(matprop.data.clone())
-        } else {
-            None
-        }
-    })
+pub fn camera_prepare_shader(
+    camera_entity: Entity,
+    entities: &EntitySystem,
+    program: &Program,
+    width: u32,
+    height: u32,
+) {
+    if let Some(camera_component) = &entities.get_component::<CameraComponent>(camera_entity) {
+        let transform_component = &entities
+            .get_component::<TransformComponent>(camera_entity)
+            .expect("Camera needs to have TransformComponent");
+        program.set_uniform_matrix_4fv(
+            &CString::new("view_matrix").unwrap(),
+            &transform_component.point_of_view().to_cols_array(),
+        );
+        program.set_uniform_matrix_4fv(
+            &CString::new("projection_matrix").unwrap(),
+            &camera_component.project(width, height).to_cols_array(),
+        );
+    } else {
+        println!("WARNING: Scene camera points to entity that either has been recycled, or does not have a camera component.");
+    }
 }
+
+#[macro_export]
+macro_rules! zip {
+    ($x: expr) => ($x);
+    ($x: expr, $($y: expr), +) => (
+        $x.zip(zip!($($y), +))
+    )
+}
+pub use zip;

@@ -11,10 +11,14 @@ glam = "0.22.0"
 rayon = "1.6.1"
 rand = "0.8.5"
 egui_sdl2_gl = { version = "0.23.0", features = [] }
-russimp = {version = "2.0.2", features = ["prebuilt"]}
+ritelinked = "0.3.2"
 project_gilgamesh_render_gl_derive = { path = "render_gl_derive" }
 
 [dependencies.sdl2]
 version = "0.35"
 default-features = false
 features = ["image", "mixer", "use-pkgconfig", "static-link"]
+
+[dependencies.gltf]
+version = "1.3.0"
+features = ["extras", "names", "KHR_materials_pbrSpecularGlossiness", "utils", "import"]
