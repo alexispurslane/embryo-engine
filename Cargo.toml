@@ -5,12 +5,12 @@ edition = "2021"
 
 [dependencies]
 gl = "0.14.0"
-egui = "0.16"
+egui = "0.23"
 image = "0.24.5"
 glam = "0.22.0"
 rayon = "1.6.1"
 rand = "0.8.5"
-egui_sdl2_gl = { path = "egui_sdl2_gl" }
+egui_sdl2_gl = { version = "0.23.0", features = [] }
 russimp = {version = "2.0.2", features = ["prebuilt"]}
 project_gilgamesh_render_gl_derive = { path = "render_gl_derive" }
 

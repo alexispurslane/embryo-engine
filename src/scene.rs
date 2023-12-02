@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use rayon::prelude::{ParallelBridge, ParallelIterator};
 
 use crate::entity::camera_component::CameraComponent;
+use crate::entity::mesh_component::Model;
 use crate::entity::transform_component::TransformComponent;
 use crate::entity::{EntityID, EntitySystem};
 use crate::render_gl::shaders::Program;
@@ -23,6 +26,7 @@ pub struct Scene {
     pub running: bool,
     pub entities: EntitySystem,
     pub shader_programs: Vec<Program>,
+    pub models: HashMap<String, Model>,
 }
 
 impl Scene {
@@ -44,8 +48,7 @@ impl Scene {
                         .as_mut()
                         .expect("Camera needs to have TransformComponent");
 
-                    camera_transform.displace_by(0, d * MOTION_SPEED * (dt / 1000.0));
-                    camera_transform.flush_matrices();
+                    camera_transform.displace_by(d * MOTION_SPEED * (dt / 1000.0));
                 }
                 SceneCommand::RotateCamera(pyr) => {
                     let camera_eid = self.camera.expect("No camera found");
@@ -55,30 +58,16 @@ impl Scene {
                         .as_mut()
                         .expect("Camera needs to have TransformComponent");
 
-                    camera_transform.rotate(0, pyr * MOUSE_SENSITIVITY * dt / 1000.0);
-                    camera_transform.flush_matrices();
+                    camera_transform.rotate(pyr * MOUSE_SENSITIVITY * dt / 1000.0);
                 }
                 SceneCommand::DisplaceEntity(eid, rel_vec) => {
                     self.entities.get_component_vec_mut::<TransformComponent>()[eid]
                         .as_mut()
                         .expect("Displaced entity must have transform component")
-                        .displace_by(0, rel_vec);
+                        .displace_by(rel_vec);
                 }
                 SceneCommand::Exit() => self.running = false,
             }
         }
-
-        self.entities
-            .get_component_vec_mut::<TransformComponent>()
-            .iter_mut()
-            .filter(|tc: &&mut Option<TransformComponent>| {
-                tc.as_ref()
-                    .map_or(false, |tc| !tc.dirty_matrices.is_empty())
-            })
-            .enumerate()
-            .par_bridge()
-            .for_each(|(eid, tc)| {
-                tc.as_mut().unwrap().flush_matrices();
-            });
     }
 }

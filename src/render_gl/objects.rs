@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use std::marker::PhantomData;
+
 use super::data;
 
 pub trait Buffer {
@@ -55,8 +57,8 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     pub fn upload_data(&mut self, buffer: &[T], flag: gl::types::GLenum) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
-            gl::BufferData(
-                self.buffer_type,
+            gl::NamedBufferData(
+                self.id,
                 buf_size,
                 buffer.as_ptr() as *const gl::types::GLvoid,
                 flag,
@@ -70,9 +72,9 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     pub fn update_data(&mut self, buffer: &[T], offset_in_ibo: usize) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
-            gl::BufferSubData(
-                self.buffer_type,
-                offset_in_ibo as gl::types::GLsizeiptr,
+            gl::NamedBufferSubData(
+                self.id,
+                (offset_in_ibo * std::mem::size_of::<T>()) as gl::types::GLsizeiptr,
                 buf_size,
                 buffer.as_ptr() as *const gl::types::GLvoid,
             )

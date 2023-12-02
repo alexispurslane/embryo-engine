@@ -4,6 +4,8 @@ use std::{
     collections::HashMap,
 };
 
+use egui::ahash::HashSet;
+
 pub mod camera_component;
 pub mod mesh_component;
 pub mod transform_component;
@@ -15,8 +17,10 @@ pub trait Component {
     fn get_id() -> ComponentID;
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct Entity {
     pub id: EntityID,
+    pub generation: usize,
 }
 
 pub trait ComponentVec {
@@ -46,57 +50,106 @@ impl<T: Component + 'static> ComponentVec for ComponentVecConcrete<T> {
 
 pub struct EntitySystem {
     pub entity_count: EntityID,
+    pub current_generation: usize,
+    pub current_entity_generations: HashMap<EntityID, usize>,
+    pub free_entities: Vec<EntityID>,
     pub components: HashMap<ComponentID, Box<dyn ComponentVec>>,
 }
 
 impl EntitySystem {
     pub fn new() -> Self {
         Self {
+            current_generation: 0,
             entity_count: 0,
             components: HashMap::new(),
+            current_entity_generations: HashMap::new(),
+            free_entities: vec![],
         }
     }
 
     pub fn new_entity(&mut self) -> Entity {
-        // New entity handle
-        let e = Entity {
-            id: self.entity_count,
-        };
-        self.entity_count += 1;
+        let e = if let Some(eid) = self.free_entities.pop() {
+            Entity {
+                id: eid,
+                generation: self.current_generation,
+            }
+        } else {
+            // New entity handle
+            self.entity_count += 1;
 
-        // Add all the entity's components to the registry
-        for (_cid, component_list) in self.components.iter_mut() {
-            component_list.add_new_entity_col();
-        }
+            // Add all the entity's components to the registry
+            for (_cid, component_list) in self.components.iter_mut() {
+                component_list.add_new_entity_col();
+            }
+
+            Entity {
+                id: self.entity_count - 1,
+                generation: self.current_generation,
+            }
+        };
+        self.current_generation += 1;
+        self.current_entity_generations.insert(e.id, e.generation);
         e
     }
 
-    pub fn delete_entity(&mut self, eid: EntityID) {
-        for (_cid, component_list) in self.components.iter_mut() {
-            component_list.remove_entity_col(eid);
+    pub fn delete_entity(&mut self, entity: Entity) {
+        if entity.generation != self.current_entity_generations[&entity.id] {
+            println!("WARNING: Tried to use recycled entity ID to refer to old entity");
+            return;
         }
+        self.current_generation += 1;
+        for (_cid, component_list) in self.components.iter_mut() {
+            component_list.remove_entity_col(entity.id);
+        }
+        self.free_entities.push(entity.id);
     }
 
-    pub fn add_component<T: Component + 'static>(&mut self, eid: EntityID, c: T) {
+    pub fn add_component<T: Component + 'static>(&mut self, entity: Entity, c: T) {
+        if entity.generation != self.current_entity_generations[&entity.id] {
+            println!("WARNING: Tried to use recycled entity ID to refer to old entity");
+            return;
+        }
+
         if let Some(component_vec) = self
             .components
             .get_mut(&T::get_id())
             .and_then(|x| x.as_any_mut().downcast_mut::<ComponentVecConcrete<T>>())
         {
-            component_vec.get_mut()[eid] = Some(c);
+            component_vec.get_mut()[entity.id] = Some(c);
         } else {
             let mut h: Vec<Option<T>> = Vec::new();
             h.resize_with(self.entity_count, || None);
 
-            h[eid] = Some(c);
+            h[entity.id] = Some(c);
             self.components
                 .insert(T::get_id(), Box::new(RefCell::new(h)));
         }
     }
 
-    pub fn remove_component<T: Component + 'static>(&mut self, eid: EntityID) {
+    pub fn remove_component<T: Component + 'static>(&mut self, entity: Entity) {
+        if entity.generation != self.current_entity_generations[&entity.id] {
+            println!("WARNING: Tried to use recycled entity ID to refer to old entity");
+            return;
+        }
+
         if let Some(component_vec) = self.components.get_mut(&T::get_id()) {
-            component_vec.remove_entity_col(eid);
+            component_vec.remove_entity_col(entity.id);
+        }
+    }
+
+    pub fn get_component<T: Component + 'static>(&self, entity: Entity) -> Option<Ref<T>> {
+        if entity.generation != self.current_entity_generations[&entity.id] {
+            println!("WARNING: Tried to use recycled entity ID to refer to old entity in a situation where a result is required");
+            return None;
+        }
+
+        let val = Ref::map(self.get_component_vec::<T>(), |vec: &Vec<Option<T>>| {
+            &vec[entity.id]
+        });
+        if val.is_some() {
+            Some(Ref::map(val, |x| x.as_ref().unwrap()))
+        } else {
+            None
         }
     }
 
@@ -134,6 +187,15 @@ impl EntitySystem {
                 )
                 .as_str(),
             )
+    }
+
+    pub fn get_with_component<'a, T: Component + 'static>(
+        &'a self,
+        ts: &'a Ref<Vec<Option<T>>>,
+    ) -> impl Iterator<Item = (EntityID, &T)> {
+        ts.iter()
+            .enumerate()
+            .filter_map(|(i, mc)| Some((i, mc.as_ref()?)))
     }
 
     // Lifetimes mean that self has to live at least as long as ts and us, I

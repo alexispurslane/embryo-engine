@@ -8,11 +8,12 @@ extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 
+use egui::FullOutput;
 use egui_backend::ShaderVersion;
-use egui_sdl2_gl as egui_backend;
+use egui_sdl2_gl::{self as egui_backend};
 use entity::EntitySystem;
 use scene::*;
-use std::io::{stdout, Write};
+use std::collections::HashMap;
 
 mod entity;
 mod events;
@@ -33,7 +34,7 @@ pub fn main() {
     let gl_attr = video_subsystem.gl_attr();
     gl_attr.set_double_buffer(true);
     gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
-    gl_attr.set_context_version(4, 3);
+    gl_attr.set_context_version(4, 6);
 
     let mut window = video_subsystem
         .window("Project Gilgamesh v0.1.0", 1920, 1080)
@@ -58,7 +59,8 @@ pub fn main() {
     let shader_ver = ShaderVersion::Default;
     let (mut painter, mut egui_state) =
         egui_backend::with_sdl2(&window, shader_ver, egui_sdl2_gl::DpiScaling::Default);
-    let mut egui_ctx = egui::CtxRef::default();
+
+    let mut egui_ctx = egui::Context::default();
 
     ///////// Iniitalize game
 
@@ -68,11 +70,12 @@ pub fn main() {
         running: true,
         entities: EntitySystem::new(),
         shader_programs: vec![],
+        models: HashMap::new(),
     };
 
     systems::add_camera(&mut scene);
     systems::add_level(&mut scene);
-    systems::setup_mesh_components(&mut scene.entities);
+    systems::load_entity_models(&scene.entities, &mut scene.models);
 
     ///////// Game loop
 
@@ -91,7 +94,7 @@ pub fn main() {
         last_time = time;
         lag += dt;
 
-        egui_state.input.time = Some(time as f64 / 1000.0f64);
+        egui_state.input.time = Some(start_time.elapsed().as_secs_f64());
 
         // Handle player input
         scene.queue_commands(events::handle_window_events(
@@ -118,22 +121,37 @@ pub fn main() {
             lag -= UPDATE_INTERVAL;
         }
 
+        // Render world
+        utils::clear_screen();
+
+        let (width, height) = window.size();
+        systems::render(
+            scene.camera,
+            &mut scene.entities,
+            &scene.shader_programs,
+            &mut scene.models,
+            width,
+            height,
+        );
+
         // Render ui
         egui_ctx.begin_frame(egui_state.input.take());
 
         egui::TopBottomPanel::bottom("bottom_panel").show(&egui_ctx, |ui| {
             ui.label("Hello world");
         });
-        let (egui_output, paint_cmds) = egui_ctx.end_frame();
-        egui_state.process_output(&window, &egui_output);
-        let paint_jobs = egui_ctx.tessellate(paint_cmds);
 
-        // Render world
-        utils::clear_screen();
-        let (width, height) = window.size();
-        systems::render(&scene, width, height);
+        let FullOutput {
+            platform_output,
+            repaint_after,
+            textures_delta,
+            shapes,
+        } = egui_ctx.end_frame();
 
-        painter.paint_jobs(None, paint_jobs, &egui_ctx.font_image());
+        egui_state.process_output(&window, &platform_output);
+
+        let paint_jobs = egui_ctx.tessellate(shapes);
+        painter.paint_jobs(None, textures_delta, paint_jobs);
 
         window.gl_swap_window();
     }

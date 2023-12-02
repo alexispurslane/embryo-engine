@@ -7,10 +7,19 @@ in VS_OUT {
     vec2 texCoord;
 } fs_in;
 
-uniform sampler2D texture0;
-uniform sampler2D texture1;
+struct Material {
+    sampler2D baseColorTexture;
+    vec4 baseColorFactor;
+    bool hasTexture;
+};
+
+uniform Material material;
+
 
 void main()
 {
-    FragColor = mix(texture(texture1, fs_in.texCoord), texture(texture0, fs_in.texCoord), 0.5);
+    if (material.hasTexture)
+        FragColor = texture(material.baseColorTexture, fs_in.texCoord);
+    else
+        FragColor = material.baseColorFactor;
 }

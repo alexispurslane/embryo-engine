@@ -195,3 +195,16 @@ pub mod shapes {
         ]
     }
 }
+
+pub fn material_get_property(
+    material: &russimp::material::Material,
+    name: &'static str,
+) -> Option<russimp::material::PropertyTypeInfo> {
+    material.properties.iter().find_map(|matprop| {
+        if matprop.key == name {
+            Some(matprop.data.clone())
+        } else {
+            None
+        }
+    })
+}

@@ -1,12 +1,13 @@
-use std::cell::Ref;
+use std::collections::HashMap;
 use std::ffi::CString;
+use std::rc::Rc;
 
 use russimp::node::Node;
-use russimp::scene::PostProcess;
 
 use crate::entity::{Component, ComponentID};
-use crate::render_gl::data;
-use crate::render_gl::textures::AbstractTexture;
+use crate::render_gl::data::{self, Cvec4, InstanceTransformVertex, VertexNormTex};
+use crate::render_gl::objects::VertexBufferObject;
+use crate::render_gl::textures::{AbstractTexture, Texture, RGB8};
 use crate::render_gl::{
     objects::{self, Buffer},
     shaders::Program,
@@ -14,102 +15,187 @@ use crate::render_gl::{
 };
 use crate::utils;
 
-type TextureID = String;
+use super::EntityID;
 
-#[derive(ComponentId)]
-pub struct ModelComponent {
-    pub meshes: Vec<Mesh>,
-    pub material_textures: Vec<Vec<Box<dyn AbstractTexture>>>,
+type TextureID = usize;
+
+#[derive(Debug)]
+enum FactorOrTexture {
+    Factor(f32),
+    VecFactor(Cvec4),
+    Texture(TextureID),
 }
 
-impl ModelComponent {
-    pub fn from_file(path: String) -> Result<Self, String> {
-        println!("Loading model from file '{}'", path);
-        let ai_scene = russimp::scene::Scene::from_file(
-            &path,
-            vec![
-                PostProcess::Triangulate,
-                PostProcess::ValidateDataStructure,
-                PostProcess::ImproveCacheLocality,
-                PostProcess::GenerateUVCoords,
-                PostProcess::OptimizeMeshes,
-                PostProcess::FlipUVs,
-            ],
-        )
-        .map_err(|x| format!("{:?}", x))?;
+pub struct Material {
+    name: String,
+    base_color: FactorOrTexture,
+    normal: Option<TextureID>,
+    metalness: FactorOrTexture,
+    roughness: FactorOrTexture,
+    ambient_occlusion: Option<TextureID>,
+}
 
-        let root_node = ai_scene
-            .root
-            .as_ref()
-            .ok_or("No root node in loaded scene")?;
+impl Material {
+    pub fn activate(&self, model: &Model, shader_program: &Program) {
+        use FactorOrTexture::*;
 
-        println!("Loading meshes from nodes:");
-        let meshes = Self::process_node(&ai_scene, root_node.borrow());
-        println!("    Meshes: {}", meshes.len());
-
-        let textures_by_material = ai_scene
-            .materials
-            .iter()
-            .enumerate()
-            .map(|(i, material)| {
-                println!(
-                    "Loading material {}, {:?}",
-                    i,
-                    material
-                        .properties
-                        .iter()
-                        .find_map(|prop| if prop.key == "?mat.name" {
-                            Some(&prop.data)
-                        } else {
-                            None
-                        })
+        match self.base_color {
+            Texture(tex) => {
+                let texture = &model.textures[tex];
+                texture.activate((0 as usize).to_texture_unit());
+                texture.bind();
+                shader_program
+                    .set_uniform_1i(&CString::new("material.baseColorTexture").unwrap(), 0);
+                shader_program.set_uniform_1b(&CString::new("material.hasTexture").unwrap(), true);
+            }
+            VecFactor(vec) => {
+                shader_program.set_uniform_4f(
+                    &CString::new("material.baseColorFactor").unwrap(),
+                    vec.d0,
+                    vec.d1,
+                    vec.d2,
+                    vec.d3,
                 );
-                material
-                    .textures
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, (_tex_ty, tex))| {
-                        let tex = tex.clone();
-                        let tex = tex.borrow();
-                        let (width, height, bytes) =
-                            utils::load_image_u8(&format!("assets/textures/{}.jpg", tex.filename));
-                        println!(
-                            "    Texture {}: {}",
-                            i,
-                            format!("assets/textures/{}.jpg", tex.filename)
-                        );
-                        let result = textures::Texture::new_with_bytes(
-                            TextureParameters::default(),
-                            &bytes,
-                            width,
-                            height,
-                        );
-                        Some(Box::new(result) as Box<dyn AbstractTexture>)
-                    })
-                    .collect()
+                shader_program.set_uniform_1b(&CString::new("material.hasTexture").unwrap(), false);
+            }
+            _ => {
+                println!("Should never get base color value: {:?}", self.base_color);
+                unreachable!()
+            }
+        }
+    }
+}
+
+pub struct Model {
+    pub meshes: Vec<Mesh>,
+    pub textures: Vec<Box<dyn AbstractTexture>>,
+    pub materials: Vec<Material>,
+    pub entities: Vec<EntityID>,
+    pub ibo: VertexBufferObject<InstanceTransformVertex>,
+    pub entities_dirty_flag: bool,
+}
+
+impl Model {
+    pub fn from_ai_scene(ai_scene: russimp::scene::Scene) -> Result<Self, String> {
+        let ibo = VertexBufferObject::new(gl::ARRAY_BUFFER);
+
+        let meshes = ai_scene
+            .meshes
+            .iter()
+            .map(|mesh| Self::process_mesh(&ai_scene, &ibo, mesh))
+            .collect::<Vec<Mesh>>();
+
+        let mut texture_ids = HashMap::new();
+        let mut textures: Vec<Box<dyn AbstractTexture>> = vec![];
+        let mut materials = vec![];
+
+        for material in ai_scene.materials {
+            let mut material_textures = HashMap::new();
+            for (texture_type, texture) in &material.textures {
+                let texture = texture.borrow();
+                if !texture_ids.contains_key(&texture.filename) {
+                    textures.push(Box::new(Self::process_texture(&texture)));
+                    texture_ids.insert(texture.filename.clone(), textures.len() - 1);
+                }
+                material_textures.insert(texture_type, texture_ids[&texture.filename]);
+            }
+
+            let base_color = material_textures
+                .get(&russimp::material::TextureType::BaseColor)
+                .map(|x| FactorOrTexture::Texture(*x))
+                .or(
+                    utils::material_get_property(&material, "$clr.base").and_then(|t| match t {
+                        russimp::material::PropertyTypeInfo::FloatArray(array) => {
+                            if array.len() == 4 {
+                                Some(FactorOrTexture::VecFactor(Cvec4::new(
+                                    array[0], array[1], array[2], array[3],
+                                )))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }),
+                )
+                .unwrap_or(FactorOrTexture::VecFactor(Cvec4::new(0.75, 0.0, 1.0, 1.0)));
+
+            let normal = material_textures
+                .get(&russimp::material::TextureType::Normals)
+                .map(|x| *x);
+
+            let metalness = material_textures
+                .get(&russimp::material::TextureType::Metalness)
+                .map(|x| FactorOrTexture::Texture(*x))
+                .or(
+                    utils::material_get_property(&material, "$mat.metallicFactor").and_then(|t| {
+                        match t {
+                            russimp::material::PropertyTypeInfo::FloatArray(array) => {
+                                if array.len() == 1 {
+                                    Some(FactorOrTexture::Factor(array[0]))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }),
+                )
+                .unwrap_or(FactorOrTexture::Factor(0.5));
+
+            let roughness = material_textures
+                .get(&russimp::material::TextureType::Roughness)
+                .map(|x| FactorOrTexture::Texture(*x))
+                .or(
+                    utils::material_get_property(&material, "$mat.roughnessFactor").and_then(|t| {
+                        match t {
+                            russimp::material::PropertyTypeInfo::FloatArray(array) => {
+                                if array.len() == 1 {
+                                    Some(FactorOrTexture::Factor(array[0]))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }),
+                )
+                .unwrap_or(FactorOrTexture::Factor(0.5));
+
+            let ambient_occlusion = material_textures
+                .get(&russimp::material::TextureType::AmbientOcclusion)
+                .map(|x| *x);
+
+            materials.push(Material {
+                name: "unknown".to_string(),
+                base_color,
+                normal,
+                metalness,
+                roughness,
+                ambient_occlusion,
             })
-            .collect();
+        }
 
         Ok(Self {
             meshes,
-            material_textures: textures_by_material,
+            textures,
+            materials,
+            ibo: ibo,
+            entities: vec![],
+            entities_dirty_flag: true,
         })
     }
 
-    fn process_node(ai_scene: &russimp::scene::Scene, node: Ref<Node>) -> Vec<Mesh> {
-        let mut node_meshes = node
-            .meshes
-            .iter()
-            .map(|id| Self::process_mesh(ai_scene, &ai_scene.meshes[*id as usize]))
-            .collect::<Vec<_>>();
-        for child in node.children.iter() {
-            let child = child.clone();
-            node_meshes.extend(Self::process_node(ai_scene, child.borrow()));
-        }
-        node_meshes
+    fn process_texture(texture: &russimp::material::Texture) -> Texture<RGB8> {
+        let (width, height, bytes) =
+            utils::load_image_u8(&format!("assets/textures/{}.jpg", texture.filename));
+        Texture::new_with_bytes(TextureParameters::default(), &bytes, width, height)
     }
 
-    fn process_mesh(ai_scene: &russimp::scene::Scene, mesh: &russimp::mesh::Mesh) -> Mesh {
+    fn process_mesh(
+        ai_scene: &russimp::scene::Scene,
+        ibo: &VertexBufferObject<InstanceTransformVertex>,
+        mesh: &russimp::mesh::Mesh,
+    ) -> Mesh {
         let mut vertices = Vec::with_capacity(mesh.vertices.len());
 
         // Set up vertices
@@ -131,109 +217,54 @@ impl ModelComponent {
             vertices.len(),
             indices.len()
         );
-        let vbo = objects::VertexBufferObject::new_with_vec(gl::ARRAY_BUFFER, &vertices);
-        let ebo = objects::ElementBufferObject::new_with_vec(&indices);
-        Mesh::new(
-            Box::new(vbo),
-            Some(ebo),
-            (0..ai_scene.materials[mesh.material_index as usize]
-                .textures
-                .len())
-                .map(|i| format!("texture{}", i))
-                .collect(),
-            mesh.material_index as usize,
-        )
-    }
 
-    pub fn setup_mesh_components(
-        &self,
-        ibo: &objects::VertexBufferObject<data::InstanceTransformVertex>,
-    ) {
-        for mesh in self.meshes.iter() {
-            // Set up the vertex array object we'll be using to render
-            mesh.vao.bind();
-
-            // Add in the vertex info
-            mesh.vbo.bind();
-            mesh.vbo.setup_vertex_attrib_pointers();
-
-            if let Some(ebo) = &mesh.ebo {
-                // Add in the index info
-                ebo.bind();
-            }
-
-            // Add in the instance info
-            ibo.bind();
-            ibo.setup_vertex_attrib_pointers();
-            mesh.vao.unbind();
-        }
-    }
-
-    pub fn render(&self, instances: u32, program: &Program) {
-        for (i, mesh) in self.meshes.iter().enumerate() {
-            mesh.render(instances, program, &self.material_textures);
-        }
+        Mesh::new(&vertices, &indices, &ibo, mesh.material_index as usize)
     }
 }
 
 pub struct Mesh {
     pub vao: objects::VertexArrayObject,
     pub vbo: Box<dyn objects::Buffer>,
-    pub ebo: Option<objects::ElementBufferObject>,
-    pub textures: Vec<TextureID>,
+    pub ebo: objects::ElementBufferObject,
     pub material_index: usize,
 }
 
 impl Mesh {
     pub fn new(
-        vbo: Box<dyn objects::Buffer>,
-        ebo: Option<objects::ElementBufferObject>,
-        textures: Vec<TextureID>,
+        vertices: &Vec<VertexNormTex>,
+        indices: &Vec<u32>,
+        ibo: &VertexBufferObject<InstanceTransformVertex>,
         material_index: usize,
     ) -> Self {
-        println!("    Mesh Textures: {:?}\n", textures);
-        Self {
-            vao: objects::VertexArrayObject::new(),
+        let vao = objects::VertexArrayObject::new();
+        let vbo = Box::new(objects::VertexBufferObject::new_with_vec(
+            gl::ARRAY_BUFFER,
+            vertices,
+        ));
+        let ebo = objects::ElementBufferObject::new_with_vec(&indices);
+
+        vao.bind();
+
+        vbo.bind();
+        vbo.setup_vertex_attrib_pointers();
+
+        ebo.bind();
+
+        ibo.bind();
+        ibo.setup_vertex_attrib_pointers();
+
+        vao.unbind();
+
+        Mesh {
+            vao,
             vbo,
             ebo,
             material_index,
-            textures,
         }
     }
+}
 
-    pub fn render(
-        &self,
-        instances: u32,
-        program: &Program,
-        textures: &Vec<Vec<Box<dyn AbstractTexture>>>,
-    ) {
-        self.vao.bind();
-        for (texture_unit_for_material, texture_name) in self.textures.iter().enumerate() {
-            let texture = &textures[self.material_index][texture_unit_for_material];
-            texture.activate(texture_unit_for_material.to_texture_unit());
-            program.set_uniform_1i(
-                &CString::new(texture_name.to_owned()).unwrap(),
-                texture_unit_for_material as i32,
-            );
-            texture.bind();
-        }
-
-        if let Some(ebo) = &self.ebo {
-            self.vao.draw_elements_instanced(
-                gl::TRIANGLES,
-                ebo.count() as gl::types::GLint,
-                gl::UNSIGNED_INT,
-                0,
-                instances as gl::types::GLint,
-            );
-        } else {
-            self.vao.draw_arrays_instanced(
-                gl::TRIANGLES,
-                0,
-                self.vbo.count() as gl::types::GLint,
-                instances as gl::types::GLint,
-            )
-        }
-        self.vao.unbind();
-    }
+#[derive(ComponentId)]
+pub struct ModelComponent {
+    pub path: String,
 }
