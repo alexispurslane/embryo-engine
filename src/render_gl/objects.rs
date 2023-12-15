@@ -35,7 +35,7 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     pub fn new(gl: &Gl, bt: gl::types::GLenum) -> Self {
         let mut vbo: gl::types::GLuint = 0;
         unsafe {
-            gl.GenBuffers(1, &mut vbo);
+            gl.CreateBuffers(1, &mut vbo);
         }
 
         VertexBufferObject {
@@ -116,7 +116,7 @@ impl ElementBufferObject {
     pub fn new(gl: &Gl) -> Self {
         let mut ebo: gl::types::GLuint = 0;
         unsafe {
-            gl.GenBuffers(1, &mut ebo);
+            gl.CreateBuffers(1, &mut ebo);
         }
         ElementBufferObject {
             gl: gl.clone(),
@@ -128,9 +128,7 @@ impl ElementBufferObject {
     pub fn new_with_vec(gl: &Gl, is: &[u32]) -> Self {
         let mut ebo = Self::new(gl);
         ebo.count = is.len();
-        ebo.bind();
         ebo.upload_data(is, gl::STATIC_DRAW);
-        ebo.unbind();
         ebo
     }
 
@@ -138,8 +136,8 @@ impl ElementBufferObject {
     pub fn upload_data(&mut self, buffer: &[u32], flag: gl::types::GLenum) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<u32>()) as gl::types::GLsizeiptr;
-            self.gl.BufferData(
-                gl::ELEMENT_ARRAY_BUFFER,
+            self.gl.NamedBufferData(
+                self.id,
                 buf_size,
                 buffer.as_ptr() as *const gl::types::GLvoid,
                 flag,

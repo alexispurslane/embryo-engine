@@ -33,6 +33,8 @@ pub fn setup_viewport(gl: &Gl, (w, h): (u32, u32)) {
         gl.Viewport(0, 0, w as gl::types::GLint, h as gl::types::GLint);
         gl.ClearColor(0.0, 0.0, 0.0, 1.0);
         gl.Enable(gl::DEPTH_TEST);
+        #[cfg(debug_assertions)]
+        gl.Enable(gl::DEBUG_OUTPUT);
     }
 }
 

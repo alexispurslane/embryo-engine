@@ -66,7 +66,7 @@ impl TransformComponent {
         self.transform.rot.y = (self.transform.rot.y + pyr.y) % 360.0;
 
         // Roll
-        self.transform.rot.z = (self.transform.rot.z + pyr.z) % 360.0;
+        self.transform.rot.z = (self.transform.rot.z + pyr.z) % 89.0;
 
         self.dirty_flag = true;
     }

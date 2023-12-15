@@ -307,6 +307,7 @@ impl MeshGl {
             gl::ARRAY_BUFFER,
             &mesh.vertices,
         ));
+        println!("indices: {}", mesh.indices.len());
         let ebo = objects::ElementBufferObject::new_with_vec(gl, &mesh.indices);
 
         vao.bind();

@@ -11,6 +11,7 @@ rayon = "1.6.1"
 rand = "0.8.5"
 ritelinked = "0.3.2" # this dependency will become unnecessary when proper transform caching is implemented!
 half = "2.3.1"
+double-buffer = "1.0.0"
 project_gilgamesh_render_gl_derive = { path = "lib/render_gl_derive" }
 imgui = "0.11.0"
 imgui-opengl-renderer = { path = "lib/imgui_opengl_renderer" }
