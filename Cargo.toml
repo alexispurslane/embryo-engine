@@ -16,6 +16,10 @@ project_gilgamesh_render_gl_derive = { path = "lib/render_gl_derive" }
 imgui = "0.11.0"
 imgui-opengl-renderer = { path = "lib/imgui_opengl_renderer" }
 imgui-sdl2-support = { path = "lib/imgui_sdl2_support" }
+core_affinity = "0.8.1"
+toml = "0.8.8"
+serde = { version = "1.0.193", features = ["derive"] }
+lazy_static = "1.4.0"
 
 [dependencies.sdl2]
 version = "0.35"

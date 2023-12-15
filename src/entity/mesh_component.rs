@@ -109,6 +109,21 @@ pub struct Model {
 /// dynamically check this at runtime to at least have some guarantees.
 unsafe impl Send for Model {}
 
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            meshes: vec![],
+            textures_raw: vec![],
+            materials: vec![],
+            entities: LinkedHashSet::new(),
+            entities_dirty_flag: true,
+            shader_program: 0,
+            textures: None,
+            ibo: None,
+        }
+    }
+}
+
 impl Model {
     pub fn from_gltf(
         (document, buffers, images): (
@@ -215,25 +230,12 @@ impl Model {
             .collect();
         let prim_end = time.elapsed().as_millis();
 
-        println!(
-            "    node {}'s primitives took {}ms to process",
-            n.name().unwrap(),
-            prim_end - prim_start
-        );
-
         let child_start = time.elapsed().as_millis();
         let children = n
             .children()
             .filter_map(|n| Self::process_node(n, &buffers).map(|x| Box::new(x)))
             .collect();
         let child_end = time.elapsed().as_millis();
-
-        println!(
-            "    node {}'s children took {}ms to process",
-            n.name().unwrap(),
-            child_end - child_start
-        );
-        println!("");
 
         Some(MeshNode {
             name: n.name().unwrap_or("UnknownMesh").to_string(),
@@ -307,7 +309,6 @@ impl MeshGl {
             gl::ARRAY_BUFFER,
             &mesh.vertices,
         ));
-        println!("indices: {}", mesh.indices.len());
         let ebo = objects::ElementBufferObject::new_with_vec(gl, &mesh.indices);
 
         vao.bind();

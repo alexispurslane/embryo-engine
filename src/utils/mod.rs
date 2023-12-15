@@ -11,6 +11,7 @@ use crate::{
         Entity, EntitySystem,
     },
     render_gl::shaders::Program,
+    scene::RenderCameraState,
 };
 
 pub type Degrees = f32;
@@ -191,28 +192,15 @@ pub mod shapes {
     }
 }
 
-pub fn camera_prepare_shader(
-    camera_entity: Entity,
-    entities: &EntitySystem,
-    program: &Program,
-    width: u32,
-    height: u32,
-) {
-    if let Some(camera_component) = &entities.get_component::<CameraComponent>(camera_entity) {
-        let transform_component = &entities
-            .get_component::<TransformComponent>(camera_entity)
-            .expect("Camera needs to have TransformComponent");
-        program.set_uniform_matrix_4fv(
-            &CString::new("view_matrix").unwrap(),
-            &transform_component.point_of_view().to_cols_array(),
-        );
-        program.set_uniform_matrix_4fv(
-            &CString::new("projection_matrix").unwrap(),
-            &camera_component.project(width, height).to_cols_array(),
-        );
-    } else {
-        println!("WARNING: Scene camera points to entity that either has been recycled, or does not have a camera component.");
-    }
+pub fn camera_prepare_shader(program: &Program, camera: &RenderCameraState) {
+    program.set_uniform_matrix_4fv(
+        &CString::new("view_matrix").unwrap(),
+        &camera.view.to_cols_array(),
+    );
+    program.set_uniform_matrix_4fv(
+        &CString::new("projection_matrix").unwrap(),
+        &camera.proj.to_cols_array(),
+    );
 }
 
 #[macro_export]

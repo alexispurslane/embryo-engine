@@ -10,34 +10,33 @@ use render_gl_derive::ComponentId;
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Transform {
     pub trans: glam::Vec3,
-    pub rot: glam::Vec3,
+    pub rot: glam::Quat,
 }
 
 impl Transform {
     pub fn to_matrix(&self) -> glam::Mat4 {
-        glam::Mat4::from_rotation_translation(
-            glam::Quat::from_euler(
-                glam::EulerRot::XYZ,
-                self.rot.x.to_radians(),
-                self.rot.y.to_radians(),
-                self.rot.z.to_radians(),
-            ),
-            self.trans,
-        )
+        glam::Mat4::from_rotation_translation(self.rot, self.trans)
     }
 }
 
 #[derive(ComponentId)]
 pub struct TransformComponent {
     pub transform: Transform,
+    /// Whether the rotating object behaves as if it is attached to the "ground"
+    /// (original XZ plane) so horizontal rotations are always relative to that
+    /// original XZ plane while vertical rotations are relative, or if all
+    /// rotations are relative. Useful for cameras.
+    pub grounded: bool,
     pub dirty_flag: bool,
 }
 
 impl TransformComponent {
-    pub fn new_from_rot_trans(rot: glam::Vec3, trans: glam::Vec3, pcf: gl::types::GLenum) -> Self {
+    pub fn new_from_rot_trans(rot: glam::Vec3, trans: glam::Vec3, grounded: bool) -> Self {
+        let rot = glam::Quat::from_euler(glam::EulerRot::XYZ, rot.x, rot.y, rot.z).normalize();
         let transform = Transform { trans, rot };
         Self {
             transform,
+            grounded,
             dirty_flag: true,
         }
     }
@@ -45,41 +44,38 @@ impl TransformComponent {
     /// Displaces object by the given relative vector *rotated by the direction
     /// the object is pointing*
     pub fn displace_by(&mut self, rel_vec: glam::Vec3) {
-        let rot = self.transform.rot;
-        let direction = glam::vec3(
-            (rot.y.to_radians()).cos() * (rot.x.to_radians()).cos(),
-            (rot.x.to_radians()).sin(),
-            (rot.y.to_radians()).sin() * (rot.x.to_radians()).cos(),
-        )
-        .normalize();
-        self.transform.trans += rel_vec.z * direction
-            + rel_vec.x * direction.cross(glam::Vec3::Y).normalize()
-            + rel_vec.y * glam::Vec3::Y;
+        self.transform.trans += self.transform.rot * rel_vec;
         self.dirty_flag = true;
     }
 
     pub fn rotate(&mut self, pyr: glam::Vec3) {
-        // Pitch
-        self.transform.rot.x = (self.transform.rot.x + pyr.x).clamp(-89.0, 89.0);
-
-        // Yaw
-        self.transform.rot.y = (self.transform.rot.y + pyr.y) % 360.0;
-
-        // Roll
-        self.transform.rot.z = (self.transform.rot.z + pyr.z) % 89.0;
+        if self.grounded {
+            let rot_xz = glam::Quat::from_euler(glam::EulerRot::XYZ, pyr.x, 0.0, pyr.z).normalize();
+            let rot_h = glam::Quat::from_euler(glam::EulerRot::XYZ, 0.0, pyr.y, 0.0).normalize();
+            // Horizontal rotations should be on an absolute axis, so we apply the
+            // original rotation first, and then premultiply the new rotation, so
+            // the new rotation is not *transformed* by the original rotation and
+            // thus in its coordinate system.
+            self.transform.rot = rot_h * self.transform.rot;
+            // All others are relative to the object's own axes, so we apply them
+            // first and then let the original transform put them in its coordinate
+            // system
+            self.transform.rot = self.transform.rot * rot_xz;
+        } else {
+            let rot = glam::Quat::from_euler(glam::EulerRot::XYZ, pyr.x, pyr.y, pyr.z).normalize();
+            self.transform.rot = self.transform.rot * rot;
+        }
 
         self.dirty_flag = true;
     }
 
     pub fn point_of_view(&self) -> glam::Mat4 {
         let Transform { trans: pos, rot } = self.transform;
-        let direction = glam::vec3(
-            (rot.y.to_radians()).cos() * (rot.x.to_radians()).cos(),
-            (rot.x.to_radians()).sin(),
-            (rot.y.to_radians()).sin() * (rot.x.to_radians()).cos(),
-        )
-        .normalize();
-        // We are *always* right side up, so we don't get the up vector
-        glam::Mat4::look_at_rh(pos, pos + direction, glam::Vec3::Y)
+        let direction = rot * glam::Vec3::Z;
+        glam::Mat4::look_at_rh(pos, pos + direction, rot * glam::Vec3::Y)
+    }
+
+    pub fn get_matrix(&self) -> glam::Mat4 {
+        self.transform.to_matrix()
     }
 }

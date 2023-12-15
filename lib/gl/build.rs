@@ -16,7 +16,7 @@ fn main() {
             Fallbacks::All,
             ["GL_EXT_texture_filter_anisotropic"],
         )
-            .write_bindings(DebugStructGenerator, &mut file_gl)
+            .write_bindings(StructGenerator, &mut file_gl)
             .unwrap()
     } else {
         Registry::new(
