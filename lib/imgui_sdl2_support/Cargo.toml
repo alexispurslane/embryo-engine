@@ -1,0 +1,15 @@
+[package]
+name = "imgui-sdl2-support"
+version = "0.11.0"
+edition = "2021"
+authors = ["The imgui-rs Developers"]
+description = "sdl2 support code for the imgui crate"
+homepage = "https://github.com/imgui-rs/imgui-rs"
+repository = "https://github.com/imgui-rs/imgui-rs"
+documentation = "https://docs.rs/imgui-sdl2-support"
+license = "MIT OR Apache-2.0"
+categories = ["gui"]
+
+[dependencies]
+imgui = "0.11.0"
+sdl2 = "0.35"

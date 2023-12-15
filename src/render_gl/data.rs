@@ -1,7 +1,9 @@
+use gl::Gl;
+
 pub trait VertexAttribute {
     /// Initialize a vertex attribute containing this type at this location,
     /// with this stride and offset.
-    unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize);
+    unsafe fn vertex_attrib_pointer(gl: &Gl, stride: usize, location: usize, offset: usize);
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -19,9 +21,9 @@ impl Cvec2 {
 
 impl VertexAttribute for Cvec2 {
     /// Enable and set the values for the one vertex attribute this vector represents
-    unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
-        gl::EnableVertexAttribArray(location as gl::types::GLuint);
-        gl::VertexAttribPointer(
+    unsafe fn vertex_attrib_pointer(gl: &Gl, stride: usize, location: usize, offset: usize) {
+        gl.EnableVertexAttribArray(location as gl::types::GLuint);
+        gl.VertexAttribPointer(
             location as gl::types::GLuint,
             2,
             gl::FLOAT,
@@ -54,9 +56,9 @@ impl Cvec3 {
 
 impl VertexAttribute for Cvec3 {
     /// Enable and set the values for the one vertex attribute this vector represents
-    unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
-        gl::EnableVertexAttribArray(location as gl::types::GLuint);
-        gl::VertexAttribPointer(
+    unsafe fn vertex_attrib_pointer(gl: &Gl, stride: usize, location: usize, offset: usize) {
+        gl.EnableVertexAttribArray(location as gl::types::GLuint);
+        gl.VertexAttribPointer(
             location as gl::types::GLuint,
             3,
             gl::FLOAT,
@@ -90,9 +92,9 @@ impl Cvec4 {
 
 impl VertexAttribute for Cvec4 {
     /// Enable and set the values for the one vertex attribute this vector represents
-    unsafe fn vertex_attrib_pointer(stride: usize, location: usize, offset: usize) {
-        gl::EnableVertexAttribArray(location as gl::types::GLuint);
-        gl::VertexAttribPointer(
+    unsafe fn vertex_attrib_pointer(gl: &Gl, stride: usize, location: usize, offset: usize) {
+        gl.EnableVertexAttribArray(location as gl::types::GLuint);
+        gl.VertexAttribPointer(
             location as gl::types::GLuint,
             4,
             gl::FLOAT,
@@ -115,7 +117,7 @@ impl From<&[f32]> for Cvec4 {
 }
 
 pub trait Vertex {
-    fn setup_vertex_attrib_pointers();
+    fn setup_vertex_attrib_pointers(gl: &Gl);
 }
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]

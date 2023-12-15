@@ -4,15 +4,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+use gl::Gl;
+
+use rayon::prelude::*;
 use ritelinked::LinkedHashSet;
 
-use crate::{
-    entity::{
-        mesh_component::{Model, ModelComponent},
-        Entity, EntitySystem,
-    },
-    scene::Scene,
+use crate::entity::{
+    mesh_component::{Model, ModelComponent},
+    Entity, EntitySystem,
 };
 
 // TODO: Actually use this.
@@ -26,11 +25,10 @@ pub struct ResourceManager {
     pub response_receiver: Receiver<(String, Model)>,
 
     pub models: HashMap<String, Model>,
-    thread_pool: ThreadPool,
 }
 
 impl ResourceManager {
-    pub fn new(num_threads: usize) -> Self {
+    pub fn new() -> Self {
         let (ress, resr) = channel();
 
         Self {
@@ -38,10 +36,6 @@ impl ResourceManager {
             response_receiver: resr,
 
             models: HashMap::new(),
-            thread_pool: ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .unwrap(),
         }
     }
 
@@ -86,15 +80,13 @@ impl ResourceManager {
             .collect::<Vec<_>>();
 
         let resp = self.response_sender.clone();
-        self.thread_pool.install(move || {
-            Self::load_models(resp, new_models);
-        })
+        Self::load_models(resp, new_models);
     }
 
     /// Checks to see if there's a new batch of models done loading. If there
     /// is, then block and integrate it. Else return. Returns true if there was
     /// new stuff and false otherwise.
-    pub fn try_integrate_loaded_models(&mut self) -> bool {
+    pub fn try_integrate_loaded_models(&mut self, gl: &Gl) -> bool {
         if let Ok((path, mut model)) = self.response_receiver.try_recv() {
             if let Some(og_model) = self.models.get_mut(&path) {
                 // A race condition must've happened where the same model was
@@ -106,7 +98,7 @@ impl ResourceManager {
                 og_model.entities_dirty_flag = true;
             } else {
                 // A proper new model! Just add it to the resources pile
-                model.setup_model_gl();
+                model.setup_model_gl(gl);
                 self.models.insert(path, model);
             }
             true

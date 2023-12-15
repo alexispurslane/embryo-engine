@@ -4,14 +4,13 @@ use std::{
     collections::HashMap,
 };
 
-use egui::ahash::HashSet;
-
 use crate::systems;
 
 use self::mesh_component::ModelComponent;
 
 pub mod camera_component;
 pub mod mesh_component;
+pub mod terrain_component;
 pub mod transform_component;
 
 pub type ComponentID = &'static str;

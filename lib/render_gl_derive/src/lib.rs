@@ -44,7 +44,7 @@ fn generate_impl(ast: &syn::DeriveInput) -> proc_macro::TokenStream {
     quote! {
         impl Vertex for #name {
             /// Enable and configure a vertex attribute for each field in this vertex
-            fn setup_vertex_attrib_pointers() {
+            fn setup_vertex_attrib_pointers(gl: &Gl) {
                 let stride = std::mem::size_of::<Self>();
 
                 let offset = 0;
@@ -109,8 +109,8 @@ fn generate_vertex_attrib_pointer_call(field: &syn::Field) -> proc_macro2::Token
     quote! {
         let location = #location;
         unsafe {
-            #field_type::vertex_attrib_pointer(stride, location, offset);
-            gl::VertexAttribDivisor(location as gl::types::GLuint, #divisor as gl::types::GLuint);
+            #field_type::vertex_attrib_pointer(gl, stride, location, offset);
+            gl.VertexAttribDivisor(location as gl::types::GLuint, #divisor as gl::types::GLuint);
         }
         let offset = offset + std::mem::size_of::<#field_type>();
     }

@@ -6,6 +6,7 @@ use crate::render_gl::shaders::Program;
 use crate::*;
 use entity::camera_component::CameraComponent;
 use entity::transform_component::TransformComponent;
+use gl::Gl;
 use rand::Rng;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use render_gl::shaders;
@@ -15,21 +16,16 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 use std::sync::mpsc::{channel, Sender};
 
-pub fn load_shaders(scene: &mut Scene) {
-    let vert_shader = shaders::Shader::from_source(
-        &CString::new(include_str!("triangle.vert")).unwrap(),
-        gl::VERTEX_SHADER,
-    )
-    .unwrap();
+pub fn load_shaders(gl: &Gl, scene: &mut Scene) {
+    let vert_shader =
+        shaders::Shader::from_file(gl, "./assets/shaders/camera.vert", gl::VERTEX_SHADER).unwrap();
 
-    let frag_shader = shaders::Shader::from_source(
-        &CString::new(include_str!("triangle.frag")).unwrap(),
-        gl::FRAGMENT_SHADER,
-    )
-    .unwrap();
+    let frag_shader =
+        shaders::Shader::from_file(gl, "./assets/shaders/material.frag", gl::FRAGMENT_SHADER)
+            .unwrap();
     scene
         .shader_programs
-        .push(Program::from_shaders(&[frag_shader, vert_shader]).unwrap());
+        .push(Program::from_shaders(gl, &[frag_shader, vert_shader]).unwrap());
 }
 
 pub fn load_entities(scene: &mut Scene) -> Vec<Entity> {
@@ -98,11 +94,11 @@ pub fn load_entity_models(scene: &mut Scene, new_entities: &Vec<Entity>) {
         .request_model_batch(&scene.entities, new_entities)
 }
 
-pub fn integrate_loaded_models(scene: &mut Scene) {
-    scene.resource_manager.try_integrate_loaded_models();
+pub fn integrate_loaded_models(gl: &Gl, scene: &mut Scene) {
+    scene.resource_manager.try_integrate_loaded_models(gl);
 }
 
-pub fn render(scene: &mut Scene, width: u32, height: u32) {
+pub fn render(gl: &Gl, scene: &mut Scene, width: u32, height: u32) {
     let mut last_shader_program_index = 0;
     let mut program = &scene.shader_programs[0];
     program.set_used();
@@ -160,15 +156,15 @@ pub fn render(scene: &mut Scene, width: u32, height: u32) {
         }
 
         for node in &model.meshes {
-            render_node_tree(&node, &model, program);
+            render_node_tree(&gl, &node, &model, program);
         }
     }
 }
 
-fn render_node_tree(node: &MeshNode, model: &Model, program: &Program) {
+fn render_node_tree(gl: &Gl, node: &MeshNode, model: &Model, program: &Program) {
     for mesh in &node.primitives {
         let mesh_gl = mesh
-            .gl
+            .gl_mesh
             .as_ref()
             .expect("Model must have OpenGL elements setup before rendering it, baka!");
         mesh_gl.vao.bind();
@@ -186,7 +182,7 @@ fn render_node_tree(node: &MeshNode, model: &Model, program: &Program) {
         mesh_gl.vao.unbind();
     }
     for child in &node.children {
-        render_node_tree(&child, model, program);
+        render_node_tree(gl, &child, model, program);
     }
 }
 

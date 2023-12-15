@@ -1,6 +1,7 @@
 use std::cell::RefMut;
 use std::collections::HashMap;
 
+use gl::Gl;
 use rayon::prelude::{ParallelBridge, ParallelIterator};
 
 use crate::entity::camera_component::CameraComponent;

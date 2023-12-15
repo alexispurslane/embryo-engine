@@ -2,6 +2,8 @@
 
 use std::marker::PhantomData;
 
+use gl::Gl;
+
 use super::data;
 
 pub trait Buffer {
@@ -16,6 +18,7 @@ pub trait Buffer {
 }
 
 pub struct VertexBufferObject<T: super::data::Vertex> {
+    gl: Gl,
     /// The internal buffer object ID OpenGL uses to bind/unbind the object.
     pub id: gl::types::GLuint,
     /// The type of buffer this is (gl::ARRAY_BUFFER)
@@ -29,13 +32,14 @@ pub struct VertexBufferObject<T: super::data::Vertex> {
 impl<T: super::data::Vertex> VertexBufferObject<T> {
     /// Request a new buffer from OpenGL and creates a struct to wrap the
     /// returned ID. Doesn't initialize the buffer.
-    pub fn new(bt: gl::types::GLenum) -> Self {
+    pub fn new(gl: &Gl, bt: gl::types::GLenum) -> Self {
         let mut vbo: gl::types::GLuint = 0;
         unsafe {
-            gl::GenBuffers(1, &mut vbo);
+            gl.GenBuffers(1, &mut vbo);
         }
 
         VertexBufferObject {
+            gl: gl.clone(),
             id: vbo,
             buffer_type: bt,
             marker: std::marker::PhantomData,
@@ -44,12 +48,10 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     }
 
     /// Request a new buffer and initialize it with the given vector.
-    pub fn new_with_vec(bt: gl::types::GLenum, vs: &[T]) -> Self {
-        let mut vbo = Self::new(bt);
+    pub fn new_with_vec(gl: &Gl, bt: gl::types::GLenum, vs: &[T]) -> Self {
+        let mut vbo = Self::new(gl, bt);
         vbo.count = vs.len();
-        vbo.bind();
         vbo.upload_data(vs, gl::STATIC_DRAW);
-        vbo.unbind();
         vbo
     }
 
@@ -57,7 +59,7 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     pub fn upload_data(&mut self, buffer: &[T], flag: gl::types::GLenum) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
-            gl::NamedBufferData(
+            self.gl.NamedBufferData(
                 self.id,
                 buf_size,
                 buffer.as_ptr() as *const gl::types::GLvoid,
@@ -72,7 +74,7 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     pub fn update_data(&mut self, buffer: &[T], offset_in_ibo: usize) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
-            gl::NamedBufferSubData(
+            self.gl.NamedBufferSubData(
                 self.id,
                 (offset_in_ibo * std::mem::size_of::<T>()) as gl::types::GLsizeiptr,
                 buf_size,
@@ -88,38 +90,43 @@ impl<T: data::Vertex> Buffer for VertexBufferObject<T> {
     }
 
     fn setup_vertex_attrib_pointers(&self) {
-        T::setup_vertex_attrib_pointers();
+        T::setup_vertex_attrib_pointers(&self.gl);
     }
 
     fn bind(&self) {
         unsafe {
-            gl::BindBuffer(self.buffer_type, self.id);
+            self.gl.BindBuffer(self.buffer_type, self.id);
         }
     }
 
     fn unbind(&self) {
         unsafe {
-            gl::BindBuffer(self.buffer_type, 0);
+            self.gl.BindBuffer(self.buffer_type, 0);
         }
     }
 }
 
 pub struct ElementBufferObject {
+    gl: Gl,
     pub id: gl::types::GLuint,
     count: usize,
 }
 
 impl ElementBufferObject {
-    pub fn new() -> Self {
+    pub fn new(gl: &Gl) -> Self {
         let mut ebo: gl::types::GLuint = 0;
         unsafe {
-            gl::GenBuffers(1, &mut ebo);
+            gl.GenBuffers(1, &mut ebo);
         }
-        ElementBufferObject { id: ebo, count: 0 }
+        ElementBufferObject {
+            gl: gl.clone(),
+            id: ebo,
+            count: 0,
+        }
     }
 
-    pub fn new_with_vec(is: &[u32]) -> Self {
-        let mut ebo = Self::new();
+    pub fn new_with_vec(gl: &Gl, is: &[u32]) -> Self {
+        let mut ebo = Self::new(gl);
         ebo.count = is.len();
         ebo.bind();
         ebo.upload_data(is, gl::STATIC_DRAW);
@@ -131,7 +138,7 @@ impl ElementBufferObject {
     pub fn upload_data(&mut self, buffer: &[u32], flag: gl::types::GLenum) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<u32>()) as gl::types::GLsizeiptr;
-            gl::BufferData(
+            self.gl.BufferData(
                 gl::ELEMENT_ARRAY_BUFFER,
                 buf_size,
                 buffer.as_ptr() as *const gl::types::GLvoid,
@@ -149,13 +156,13 @@ impl Buffer for ElementBufferObject {
 
     fn bind(&self) {
         unsafe {
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.id);
+            self.gl.BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.id);
         }
     }
 
     fn unbind(&self) {
         unsafe {
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, 0);
+            self.gl.BindBuffer(gl::ELEMENT_ARRAY_BUFFER, 0);
         }
     }
 
@@ -167,7 +174,7 @@ impl Buffer for ElementBufferObject {
 impl Drop for ElementBufferObject {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteBuffers(1, &mut self.id);
+            self.gl.DeleteBuffers(1, &mut self.id);
         }
     }
 }
@@ -175,22 +182,26 @@ impl Drop for ElementBufferObject {
 impl<T: super::data::Vertex> Drop for VertexBufferObject<T> {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteBuffers(1, &mut self.id);
+            self.gl.DeleteBuffers(1, &mut self.id);
         }
     }
 }
 
 pub struct VertexArrayObject {
+    gl: Gl,
     pub id: gl::types::GLuint,
 }
 
 impl VertexArrayObject {
-    pub fn new() -> Self {
+    pub fn new(gl: &Gl) -> Self {
         let mut vao: gl::types::GLuint = 0;
         unsafe {
-            gl::GenVertexArrays(1, &mut vao);
+            gl.GenVertexArrays(1, &mut vao);
         }
-        VertexArrayObject { id: vao }
+        VertexArrayObject {
+            gl: gl.clone(),
+            id: vao,
+        }
     }
 
     pub fn draw_arrays(
@@ -200,7 +211,7 @@ impl VertexArrayObject {
         count: gl::types::GLsizei,
     ) {
         unsafe {
-            gl::DrawArrays(mode, first, count);
+            self.gl.DrawArrays(mode, first, count);
         }
     }
 
@@ -212,7 +223,8 @@ impl VertexArrayObject {
         offset: gl::types::GLint,
     ) {
         unsafe {
-            gl::DrawElements(mode, count, ty, offset as *const gl::types::GLvoid);
+            self.gl
+                .DrawElements(mode, count, ty, offset as *const gl::types::GLvoid);
         }
     }
 
@@ -225,7 +237,7 @@ impl VertexArrayObject {
         num_instances: gl::types::GLint,
     ) {
         unsafe {
-            gl::DrawElementsInstanced(
+            self.gl.DrawElementsInstanced(
                 mode,
                 count,
                 ty,
@@ -243,19 +255,20 @@ impl VertexArrayObject {
         num_instances: gl::types::GLint,
     ) {
         unsafe {
-            gl::DrawArraysInstanced(mode, first, count, num_instances);
+            self.gl
+                .DrawArraysInstanced(mode, first, count, num_instances);
         }
     }
 
     pub fn bind(&self) {
         unsafe {
-            gl::BindVertexArray(self.id);
+            self.gl.BindVertexArray(self.id);
         }
     }
 
     pub fn unbind(&self) {
         unsafe {
-            gl::BindVertexArray(0);
+            self.gl.BindVertexArray(0);
         }
     }
 }
@@ -263,7 +276,7 @@ impl VertexArrayObject {
 impl Drop for VertexArrayObject {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteVertexArrays(1, &mut self.id);
+            self.gl.DeleteVertexArrays(1, &mut self.id);
         }
     }
 }

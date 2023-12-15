@@ -12,15 +12,6 @@ struct Material {
     sampler2D diffuseTexture;
     vec4 diffuseFactor;
     bool diffuseIsTexture;
-
-    sampler2D specularGlossinessTexture;
-    float specularFactor;
-    float glossinessFactor;
-    bool specularIsTexture;
-    bool glossinessIsTexture;
-
-    sampler2D normalTexture;
-    bool hasNormalTexture;
 };
 
 uniform Material material;

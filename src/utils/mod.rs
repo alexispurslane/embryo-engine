@@ -1,5 +1,6 @@
 use std::{cell::RefMut, ffi::CString};
 
+use gl::Gl;
 use sdl2::image::LoadSurface;
 use std::cell::Ref;
 
@@ -21,35 +22,17 @@ pub fn create_whitespace_cstring(len: usize) -> CString {
     unsafe { CString::from_vec_unchecked(buffer) }
 }
 
-pub fn load_image_u8(path: &str) -> (u32, u32, Vec<u8>) {
-    let image_surface = sdl2::surface::Surface::from_file(path)
-        .expect(&format!(
-            "Cannnot open texture '{}' for read from working directory {}",
-            path,
-            std::env::current_dir().unwrap().to_string_lossy()
-        ))
-        .convert_format(sdl2::pixels::PixelFormatEnum::RGB24)
-        .unwrap();
-    image_surface.with_lock(|pixels| {
-        (
-            image_surface.width(),
-            image_surface.height(),
-            pixels.to_vec(),
-        )
-    })
-}
-
-pub fn clear_screen() {
+pub fn clear_screen(gl: &Gl) {
     unsafe {
-        gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+        gl.Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
     }
 }
 
-pub fn setup_viewport((w, h): (u32, u32)) {
+pub fn setup_viewport(gl: &Gl, (w, h): (u32, u32)) {
     unsafe {
-        gl::Viewport(0, 0, w as gl::types::GLint, h as gl::types::GLint);
-        gl::ClearColor(0.0, 0.0, 0.0, 1.0);
-        gl::Enable(gl::DEPTH_TEST);
+        gl.Viewport(0, 0, w as gl::types::GLint, h as gl::types::GLint);
+        gl.ClearColor(0.0, 0.0, 0.0, 1.0);
+        gl.Enable(gl::DEPTH_TEST);
     }
 }
 

@@ -4,6 +4,7 @@ use std::ffi::CString;
 use std::rc::Rc;
 use std::thread::{self, Thread};
 
+use gl::Gl;
 use gltf::Gltf;
 use image::GenericImageView;
 use rayon::prelude::ParallelBridge;
@@ -37,11 +38,6 @@ enum FactorOrTexture {
 pub struct Material {
     name: String,
     diffuse: FactorOrTexture,
-    // specular and glossiness actually share a texture when they have a
-    // texture, but since we're just storing IDs here it doesn't matter
-    specular: FactorOrTexture,
-    glossiness: FactorOrTexture,
-    normal: Option<TextureID>,
 }
 
 impl Material {
@@ -83,12 +79,12 @@ pub struct MeshNode {
 }
 
 impl MeshNode {
-    pub fn setup_mesh_gl(&mut self, ibo: &VertexBufferObject<InstanceTransformVertex>) {
+    pub fn setup_mesh_gl(&mut self, gl: &Gl, ibo: &VertexBufferObject<InstanceTransformVertex>) {
         for primitive in self.primitives.iter_mut() {
-            primitive.gl = Some(MeshGl::setup_mesh_gl(&primitive, &ibo));
+            primitive.gl_mesh = Some(MeshGl::setup_mesh_gl(gl, &primitive, &ibo));
         }
         for child in self.children.iter_mut() {
-            child.setup_mesh_gl(ibo);
+            child.setup_mesh_gl(gl, ibo);
         }
     }
 }
@@ -177,7 +173,6 @@ impl Model {
             .map(|prim| {
                 let reader = prim.reader(|b| buffers.get(b.index()).map(|x| &*x.0));
 
-                let vert_start = time.elapsed().as_millis();
                 let vertices = {
                     let positions = reader.read_positions();
                     let normals = reader.read_normals();
@@ -206,11 +201,6 @@ impl Model {
                     })
                     .collect::<Vec<VertexNormTexTan>>()
                 };
-                let vert_end = time.elapsed().as_millis();
-                println!(
-                    "      processing this primitive's vertices took {}ms",
-                    vert_end - vert_start
-                );
                 let indices = reader.read_indices().unwrap().into_u32().collect();
                 let material_index = prim.material().index().unwrap();
                 let bounding_box = prim.bounding_box();
@@ -219,7 +209,7 @@ impl Model {
                     indices,
                     material_index,
                     bounding_box,
-                    gl: None,
+                    gl_mesh: None,
                 }
             })
             .collect();
@@ -261,34 +251,7 @@ impl Model {
                 .map_or(FactorOrTexture::Vec4(pbr.base_color_factor()), |info| {
                     FactorOrTexture::Texture(info.texture().index())
                 }),
-            specular: FactorOrTexture::Vec3([0.5, 0.5, 0.5]),
-            glossiness: FactorOrTexture::Factor(0.5),
-            normal: None,
         }
-        /*
-        let phong = m.pbr_specular_glossiness().expect(&format!(
-            "Did you export your gltf without specular glossiness for material {}?",
-            m.name().unwrap()
-        ));
-        Material {
-            name: m.name().unwrap_or("UnknownMaterial").to_string(),
-            diffuse: phong
-                .diffuse_texture()
-                .map_or(FactorOrTexture::Vec4(phong.diffuse_factor()), |info| {
-                    FactorOrTexture::Texture(info.texture().index())
-                }),
-            specular: phong
-                .specular_glossiness_texture()
-                .map_or(FactorOrTexture::Vec3(phong.specular_factor()), |info| {
-                    FactorOrTexture::Texture(info.texture().index())
-                }),
-            glossiness: phong
-                .specular_glossiness_texture()
-                .map_or(FactorOrTexture::Factor(phong.glossiness_factor()), |info| {
-                    FactorOrTexture::Texture(info.texture().index())
-                }),
-            normal: m.normal_texture().map(|t| t.texture().index()),
-        }*/
     }
 
     pub fn process_texture(
@@ -301,16 +264,17 @@ impl Model {
         (image.pixels.clone(), image.width, image.height)
     }
 
-    pub fn setup_model_gl(&mut self) {
+    pub fn setup_model_gl(&mut self, gl: &Gl) {
         if !thread::current().name().is_some_and(|x| x.contains("main")) {
             panic!("Called OpenGL setup function on model while not on main thread: this is undefined behavior!");
         }
-        self.ibo = Some(VertexBufferObject::new(gl::ARRAY_BUFFER));
+        self.ibo = Some(VertexBufferObject::new(gl, gl::ARRAY_BUFFER));
         self.textures = Some(
             self.textures_raw
                 .iter()
                 .map(|(bytes, width, height)| {
                     Box::new(Texture::new_with_bytes(
+                        gl,
                         TextureParameters::default(),
                         bytes,
                         *width,
@@ -320,7 +284,7 @@ impl Model {
                 .collect::<Vec<Box<dyn AbstractTexture>>>(),
         );
         for mesh_node in self.meshes.iter_mut() {
-            mesh_node.setup_mesh_gl(self.ibo.as_ref().unwrap());
+            mesh_node.setup_mesh_gl(gl, self.ibo.as_ref().unwrap());
         }
     }
 }
@@ -332,13 +296,18 @@ pub struct MeshGl {
 }
 
 impl MeshGl {
-    pub fn setup_mesh_gl(mesh: &Mesh, ibo: &VertexBufferObject<InstanceTransformVertex>) -> Self {
-        let vao = objects::VertexArrayObject::new();
+    pub fn setup_mesh_gl(
+        gl: &Gl,
+        mesh: &Mesh,
+        ibo: &VertexBufferObject<InstanceTransformVertex>,
+    ) -> Self {
+        let vao = objects::VertexArrayObject::new(gl);
         let vbo = Box::new(objects::VertexBufferObject::new_with_vec(
+            gl,
             gl::ARRAY_BUFFER,
             &mesh.vertices,
         ));
-        let ebo = objects::ElementBufferObject::new_with_vec(&mesh.indices);
+        let ebo = objects::ElementBufferObject::new_with_vec(gl, &mesh.indices);
 
         vao.bind();
 
@@ -359,7 +328,7 @@ impl MeshGl {
 pub struct Mesh {
     vertices: Vec<VertexNormTexTan>,
     indices: Vec<u32>,
-    pub gl: Option<MeshGl>,
+    pub gl_mesh: Option<MeshGl>,
     pub material_index: usize,
     pub bounding_box: gltf::mesh::BoundingBox,
 }
@@ -378,7 +347,7 @@ impl Mesh {
             indices,
             material_index,
             bounding_box,
-            gl: None,
+            gl_mesh: None,
         }
     }
 }

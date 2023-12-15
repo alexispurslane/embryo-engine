@@ -1,6 +1,4 @@
 use crate::scene::*;
-use egui_sdl2_gl::painter::Painter;
-use egui_sdl2_gl::EguiStateHandler;
 use sdl2::event::Event;
 use sdl2::event::EventPollIterator;
 use sdl2::keyboard::{KeyboardState, Scancode};
@@ -35,13 +33,14 @@ pub fn handle_mouse(_scene: &Scene, mouse_state: &RelativeMouseState) -> Vec<Sce
 
 pub fn handle_window_events(
     window: &mut sdl2::video::Window,
+    imgui: &mut imgui::Context,
+    platform: &mut imgui_sdl2_support::SdlPlatform,
     mouse_util: &mut MouseUtil,
-    egui_state: &mut EguiStateHandler,
-    painter: &mut Painter,
     events: EventPollIterator,
 ) -> Vec<SceneCommand> {
     let mut commands = Vec::<SceneCommand>::new();
     for event in events {
+        platform.handle_event(imgui, &event);
         match event {
             Event::Quit { .. } => commands.push(SceneCommand::Exit()),
             Event::KeyDown {
@@ -50,9 +49,7 @@ pub fn handle_window_events(
             } => {
                 mouse_util.set_relative_mouse_mode(!mouse_util.relative_mouse_mode());
             }
-            _ => {
-                egui_state.process_input(window, event, painter);
-            }
+            _ => {}
         }
     }
     commands
