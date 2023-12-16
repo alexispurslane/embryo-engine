@@ -1,8 +1,6 @@
 use std::{cell::RefMut, ffi::CString};
 
 use gl::Gl;
-use sdl2::image::LoadSurface;
-use std::cell::Ref;
 
 use crate::{
     entity::{
@@ -34,6 +32,7 @@ pub fn setup_viewport(gl: &Gl, (w, h): (u32, u32)) {
         gl.Viewport(0, 0, w as gl::types::GLint, h as gl::types::GLint);
         gl.ClearColor(0.0, 0.0, 0.0, 1.0);
         gl.Enable(gl::DEPTH_TEST);
+        gl.Enable(gl::CULL_FACE);
         #[cfg(debug_assertions)]
         gl.Enable(gl::DEBUG_OUTPUT);
     }
@@ -211,3 +210,56 @@ macro_rules! zip {
     )
 }
 pub use zip;
+
+pub mod config {
+    use serde::Deserialize;
+    use std::io::prelude::*;
+    #[derive(Deserialize)]
+    pub struct PerfConfig {
+        pub update_interval: u64,
+        pub cap_update_fps: bool,
+        pub cap_render_fps: bool,
+        pub max_batch_size: u64,
+    }
+
+    #[derive(Deserialize)]
+    pub struct ControlConfig {
+        pub mouse_sensitivity: f32,
+        pub motion_speed: f32,
+    }
+
+    #[derive(Deserialize)]
+    pub struct GameConfig {
+        pub performance: PerfConfig,
+        pub controls: ControlConfig,
+    }
+
+    pub fn read_config() -> GameConfig {
+        let mut contents = String::new();
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open("./data/config.toml")
+        {
+            file.read_to_string(&mut contents).unwrap();
+            println!("{contents}");
+            if contents.len() == 0 {
+                contents = r#"
+[performance]
+update_interval = 16
+cap_render_fps = true
+cap_update_fps = true
+max_batch_size = 1000
+
+[controls]
+mouse_sensitivity = 1.0
+motion_speed = 10.0
+"#
+                .into();
+                file.write(contents.as_bytes()).unwrap();
+            }
+        }
+        toml::from_str(&contents).unwrap()
+    }
+}

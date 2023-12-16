@@ -1,5 +1,6 @@
 use crate::rayon::iter::ParallelIterator;
-use std::collections::HashMap;
+use crate::CONFIG;
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::rc::Rc;
 use std::thread::{self, Thread};
@@ -8,7 +9,6 @@ use gl::Gl;
 use gltf::Gltf;
 use image::GenericImageView;
 use rayon::prelude::ParallelBridge;
-use ritelinked::LinkedHashSet;
 
 use crate::entity::{Component, ComponentID};
 use crate::render_gl::data::{
@@ -75,16 +75,12 @@ impl Material {
 pub struct MeshNode {
     pub name: String,
     pub primitives: Vec<Mesh>,
-    pub children: Vec<Box<MeshNode>>,
 }
 
 impl MeshNode {
     pub fn setup_mesh_gl(&mut self, gl: &Gl, ibo: &VertexBufferObject<InstanceTransformVertex>) {
         for primitive in self.primitives.iter_mut() {
             primitive.gl_mesh = Some(MeshGl::setup_mesh_gl(gl, &primitive, &ibo));
-        }
-        for child in self.children.iter_mut() {
-            child.setup_mesh_gl(gl, ibo);
         }
     }
 }
@@ -94,7 +90,7 @@ pub struct Model {
     pub textures_raw: Vec<(Vec<u8>, u32, u32)>,
     pub materials: Vec<Material>,
 
-    pub entities: LinkedHashSet<Entity>,
+    pub entities: HashSet<Entity>,
 
     pub entities_dirty_flag: bool,
     pub shader_program: usize,
@@ -115,7 +111,7 @@ impl Default for Model {
             meshes: vec![],
             textures_raw: vec![],
             materials: vec![],
-            entities: LinkedHashSet::new(),
+            entities: HashSet::new(),
             entities_dirty_flag: true,
             shader_program: 0,
             textures: None,
@@ -143,7 +139,7 @@ impl Model {
 
         let mesh_start = time.elapsed().as_millis();
         let meshes = document
-            .nodes()
+            .meshes()
             .filter_map(|n| Self::process_node(n, &buffers))
             .collect::<Vec<MeshNode>>();
         let mesh_end = time.elapsed().as_millis();
@@ -168,7 +164,7 @@ impl Model {
             textures_raw,
             materials,
 
-            entities: LinkedHashSet::new(),
+            entities: HashSet::new(),
 
             entities_dirty_flag: true,
             shader_program: 0,
@@ -178,12 +174,11 @@ impl Model {
         })
     }
 
-    fn process_node(n: gltf::Node, buffers: &Vec<gltf::buffer::Data>) -> Option<MeshNode> {
+    fn process_node(n: gltf::Mesh, buffers: &Vec<gltf::buffer::Data>) -> Option<MeshNode> {
         let time = std::time::Instant::now();
 
         let prim_start = time.elapsed().as_millis();
         let primitives = n
-            .mesh()?
             .primitives()
             .map(|prim| {
                 let reader = prim.reader(|b| buffers.get(b.index()).map(|x| &*x.0));
@@ -230,17 +225,9 @@ impl Model {
             .collect();
         let prim_end = time.elapsed().as_millis();
 
-        let child_start = time.elapsed().as_millis();
-        let children = n
-            .children()
-            .filter_map(|n| Self::process_node(n, &buffers).map(|x| Box::new(x)))
-            .collect();
-        let child_end = time.elapsed().as_millis();
-
         Some(MeshNode {
             name: n.name().unwrap_or("UnknownMesh").to_string(),
             primitives,
-            children,
         })
     }
 
@@ -271,6 +258,40 @@ impl Model {
             panic!("Called OpenGL setup function on model while not on main thread: this is undefined behavior!");
         }
         self.ibo = Some(VertexBufferObject::new(gl, gl::ARRAY_BUFFER));
+        // since we have a maximum batch size, we know the total amount of
+        // instances this buffer will need to be able to hold ahead of time!
+        // This saves us some work during rendering.
+        self.ibo.as_mut().unwrap().recreate_with_data(
+            &(0..CONFIG.performance.max_batch_size)
+                .map(|_| InstanceTransformVertex {
+                    d0: Cvec4 {
+                        d0: 0.0,
+                        d1: 0.0,
+                        d2: 0.0,
+                        d3: 0.0,
+                    },
+                    d1: Cvec4 {
+                        d0: 0.0,
+                        d1: 0.0,
+                        d2: 0.0,
+                        d3: 0.0,
+                    },
+                    d2: Cvec4 {
+                        d0: 0.0,
+                        d1: 0.0,
+                        d2: 0.0,
+                        d3: 0.0,
+                    },
+                    d3: Cvec4 {
+                        d0: 0.0,
+                        d1: 0.0,
+                        d2: 0.0,
+                        d3: 0.0,
+                    },
+                })
+                .collect::<Vec<InstanceTransformVertex>>(),
+            gl::STREAM_DRAW,
+        );
         self.textures = Some(
             self.textures_raw
                 .iter()

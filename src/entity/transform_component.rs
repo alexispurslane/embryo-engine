@@ -26,6 +26,7 @@ pub struct TransformComponent {
     /// (original XZ plane) so horizontal rotations are always relative to that
     /// original XZ plane while vertical rotations are relative, or if all
     /// rotations are relative. Useful for cameras.
+    matrix: glam::Mat4,
     pub grounded: bool,
     pub dirty_flag: bool,
 }
@@ -37,7 +38,8 @@ impl TransformComponent {
         Self {
             transform,
             grounded,
-            dirty_flag: true,
+            matrix: transform.to_matrix(),
+            dirty_flag: false,
         }
     }
 
@@ -75,7 +77,10 @@ impl TransformComponent {
         glam::Mat4::look_at_rh(pos, pos + direction, rot * glam::Vec3::Y)
     }
 
-    pub fn get_matrix(&self) -> glam::Mat4 {
-        self.transform.to_matrix()
+    pub fn get_matrix(&mut self) -> glam::Mat4 {
+        if self.dirty_flag {
+            self.matrix = self.transform.to_matrix();
+        }
+        self.matrix
     }
 }

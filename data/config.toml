@@ -1,8 +1,9 @@
 
 [performance]
 update_interval = 16
-cap_render_fps = true
+cap_render_fps = false
 cap_update_fps = true
+max_batch_size = 1000
 
 [controls]
 mouse_sensitivity = 1.0

@@ -10,11 +10,6 @@ use gl::Gl;
 use rand::Rng;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use render_gl::shaders;
-use ritelinked::LinkedHashSet;
-use std::any::Any;
-use std::ffi::CString;
-use std::marker::PhantomData;
-use std::sync::mpsc::{channel, Sender};
 
 pub fn load_shaders(gl: &Gl, render: &mut RenderState) {
     let vert_shader =
@@ -40,13 +35,9 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
     scene.camera = Some(e);
 
     let mut trng = rand::thread_rng();
-    let data = [
-        "./data/models/emily.glb",
-        "./data/models/cube.glb",
-        "./data/models/emily.gltf",
-    ];
+    let data = ["./data/models/heroine.glb"];
     let mut entities = vec![];
-    for i in 0..100 {
+    for i in 0..10000 {
         let thing = scene.entities.new_entity();
         scene.entities.add_component(
             thing,
@@ -59,7 +50,11 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
             thing,
             TransformComponent::new_from_rot_trans(
                 glam::Vec3::ZERO,
-                glam::vec3((i - 50) as f32 * 1.0, 0.0, 0.0),
+                glam::vec3(
+                    (i % 25) as f32 * 1.0,
+                    ((i / 25) % 25) as f32 * 2.0,
+                    (i / 625) as f32 * 1.0,
+                ),
                 false,
             ),
         );
@@ -71,13 +66,16 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
 pub fn unload_entity_models(
     scene: &mut GameState,
     render: &mut RenderState,
+    resource_manager: &ResourceManager,
     new_entities: &Vec<Entity>,
 ) {
+    let mut removes = vec![];
     for entity in new_entities {
         let model_component = scene
             .entities
             .get_component::<ModelComponent>(*entity)
             .unwrap();
+        removes.push((model_component.path.clone(), *entity));
         if let Some(model) = render.models.get_mut(&model_component.path) {
             model.entities.remove(&entity);
             model.entities_dirty_flag = true;
@@ -86,11 +84,12 @@ pub fn unload_entity_models(
             }
         }
     }
+    resource_manager.request_unload_models(removes);
 }
 
 pub fn load_entity_models(
     scene: &mut GameState,
-    resource_manager: &mut ResourceManager,
+    resource_manager: &ResourceManager,
     new_entities: &Vec<Entity>,
 ) {
     resource_manager.request_models(
@@ -106,7 +105,7 @@ pub fn load_entity_models(
 
 pub fn integrate_loaded_models(
     gl: &Gl,
-    resource_manager: &mut ResourceManager,
+    resource_manager: &ResourceManager,
     render: &mut RenderState,
 ) {
     resource_manager.try_integrate_loaded_models(&mut render.models, gl);
@@ -139,55 +138,40 @@ pub fn render(gl: &Gl, render: &mut RenderState, width: u32, height: u32) {
                 })
                 .map(|mat| InstanceTransformVertex::new(mat.to_cols_array()))
                 .collect::<Vec<InstanceTransformVertex>>();
-        model
-            .ibo
-            .as_mut()
-            .expect("Model must have an instance buffer object by the time rendering starts.")
-            .upload_data(&new_transforms, gl::DYNAMIC_DRAW);
-        model.entities_dirty_flag = false;
+        let batches = (new_transforms.len() as u64).div_ceil(CONFIG.performance.max_batch_size);
+        let mbs = CONFIG.performance.max_batch_size as usize;
+        for batch in 0..batches {
+            let batch_start = batch as usize * mbs;
+            let batch_size = mbs.min(new_transforms.len() - batch_start) as usize;
+            model
+                .ibo
+                .as_mut()
+                .expect("Model must have an instance buffer object by the time rendering starts.")
+                .send_data(&new_transforms[batch_start..batch_start + batch_size], 0);
 
-        for node in &model.meshes {
-            render_node_tree(&gl, &node, &model, program);
-        }
-    }
-}
+            for mesh in &model.meshes {
+                for mesh in &mesh.primitives {
+                    let mesh_gl = mesh
+                        .gl_mesh
+                        .as_ref()
+                        .expect("Model must have OpenGL elements setup before rendering it, baka!");
+                    mesh_gl.vao.bind();
 
-fn render_node_tree(gl: &Gl, node: &MeshNode, model: &Model, program: &Program) {
-    for mesh in &node.primitives {
-        let mesh_gl = mesh
-            .gl_mesh
-            .as_ref()
-            .expect("Model must have OpenGL elements setup before rendering it, baka!");
-        mesh_gl.vao.bind();
+                    let material = &model.materials[mesh.material_index];
+                    material.activate(&model, &program);
 
-        let material = &model.materials[mesh.material_index];
-        material.activate(&model, &program);
-
-        mesh_gl.vao.draw_elements_instanced(
-            gl::TRIANGLES,
-            mesh_gl.ebo.count() as gl::types::GLint,
-            gl::UNSIGNED_INT,
-            0,
-            model.entities.len() as gl::types::GLint,
-        );
-        mesh_gl.vao.unbind();
-    }
-    for child in &node.children {
-        render_node_tree(gl, &child, model, program);
-    }
-}
-
-pub fn physics(scene: &mut GameState, dt: u128) {
-    for (eid, tc) in scene
-        .entities
-        .get_component_vec_mut::<TransformComponent>()
-        .iter_mut()
-        .enumerate()
-    {
-        if let Some(tc) = tc {
-            if eid % 2 != 0 {
-                tc.displace_by(glam::vec3(0.0, 0.1 * dt as f32, 0.0));
+                    mesh_gl.vao.draw_elements_instanced(
+                        gl::TRIANGLES,
+                        mesh_gl.ebo.count() as gl::types::GLint,
+                        gl::UNSIGNED_INT,
+                        0,
+                        batch_size as gl::types::GLint,
+                    );
+                    mesh_gl.vao.unbind();
+                }
             }
         }
     }
 }
+
+pub fn physics(scene: &mut GameState, dt: u128) {}

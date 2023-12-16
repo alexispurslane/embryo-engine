@@ -51,12 +51,12 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
     pub fn new_with_vec(gl: &Gl, bt: gl::types::GLenum, vs: &[T]) -> Self {
         let mut vbo = Self::new(gl, bt);
         vbo.count = vs.len();
-        vbo.upload_data(vs, gl::STATIC_DRAW);
+        vbo.recreate_with_data(vs, gl::STATIC_DRAW);
         vbo
     }
 
-    /// Writes in new per-vertex data
-    pub fn upload_data(&mut self, buffer: &[T], flag: gl::types::GLenum) {
+    /// Recreates/regenerates the buffer with a given size and content
+    pub fn recreate_with_data(&mut self, buffer: &[T], flag: gl::types::GLenum) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
             self.gl.NamedBufferData(
@@ -71,7 +71,7 @@ impl<T: super::data::Vertex> VertexBufferObject<T> {
 
     /// Overwrites a section of the vertex buffer at the given offset without
     /// clearing the rest or resizing or changing the flag
-    pub fn update_data(&mut self, buffer: &[T], offset_in_ibo: usize) {
+    pub fn send_data(&mut self, buffer: &[T], offset_in_ibo: usize) {
         unsafe {
             let buf_size = (buffer.len() * std::mem::size_of::<T>()) as gl::types::GLsizeiptr;
             self.gl.NamedBufferSubData(

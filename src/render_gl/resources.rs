@@ -10,7 +10,6 @@ use std::{
 use gl::Gl;
 
 use rayon::prelude::*;
-use ritelinked::LinkedHashSet;
 
 use crate::entity::{
     mesh_component::{Model, ModelComponent},
@@ -20,6 +19,7 @@ use crate::entity::{
 #[derive(Debug)]
 pub enum ResourceRequest {
     Models(Vec<(String, Entity)>),
+    UnloadModels(Vec<(String, Entity)>),
     Textures(Vec<String>),
     WorldChunks(Vec<(u32, u32)>),
 }
@@ -100,6 +100,19 @@ impl ResourceManager {
                                     }
                                 }
                             }
+                            ResourceRequest::UnloadModels(model_unload_reqs) => {
+                                let mut loaded_loading_models =
+                                    state.loaded_loading_models.write().unwrap();
+                                for (model, entity) in model_unload_reqs {
+                                    if let Some((_, using)) = loaded_loading_models.get_mut(&model)
+                                    {
+                                        using.remove(&entity);
+                                        if using.is_empty() {
+                                            loaded_loading_models.remove_entry(&model);
+                                        }
+                                    }
+                                }
+                            }
                             ResourceRequest::Textures(texture_reqs) => unimplemented!(),
                             ResourceRequest::WorldChunks(chunk_reqs) => unimplemented!(),
                         }
@@ -122,12 +135,17 @@ impl ResourceManager {
             .send(ResourceRequest::Models(requests))
             .unwrap()
     }
+    pub fn request_unload_models(&self, requests: Vec<(String, Entity)>) {
+        self.request_sender
+            .send(ResourceRequest::UnloadModels(requests))
+            .unwrap()
+    }
 
     /// Checks to see if there's a new batch of models done loading. If there
     /// is, then block and integrate it. Else return. Returns true if there was
     /// new stuff and false otherwise.
     pub fn try_integrate_loaded_models(
-        &mut self,
+        &self,
         models: &mut HashMap<String, Model>,
         gl: &Gl,
     ) -> bool {
