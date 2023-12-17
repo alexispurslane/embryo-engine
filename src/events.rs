@@ -1,12 +1,6 @@
-use crate::scene;
-use crate::CONFIG;
-use scene::{GameState, SceneCommand};
-use sdl2::event::Event;
-use sdl2::event::EventPollIterator;
-use sdl2::keyboard::{KeyboardState, Scancode};
-use sdl2::mouse::MouseUtil;
+use crate::update_thread::{GameState, GameStateEvent};
+use sdl2::keyboard::Scancode;
 use sdl2::mouse::RelativeMouseState;
-use std::sync::mpsc::Sender;
 
 pub fn handle_keyboard(
     game_state: &mut GameState,
@@ -40,9 +34,9 @@ pub fn handle_mouse(game_state: &mut GameState, mouse_state: &RelativeMouseState
     game_state.rotate_camera(glam::vec3(yo, -xo, 0.0), dt);
 }
 
-pub fn handle_event(game_state: &mut GameState, event: scene::Event, dt: u128) {
+pub fn handle_event(game_state: &mut GameState, event: GameStateEvent, dt: u128) {
     match event {
-        scene::Event::FrameEvent(scancodes, mouse_state) => {
+        GameStateEvent::FrameEvent(scancodes, mouse_state) => {
             handle_keyboard(game_state, scancodes, dt);
             handle_mouse(game_state, &mouse_state, dt);
         }

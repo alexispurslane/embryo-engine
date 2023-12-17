@@ -1,20 +1,26 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
+extern crate bytes;
 extern crate gl;
 extern crate glam;
 extern crate gltf;
 extern crate rayon;
+extern crate rmp;
 extern crate sdl2;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 extern crate imgui;
 extern crate imgui_opengl_renderer;
 extern crate imgui_sdl2_support;
-extern crate serde;
 
 use entity::EntitySystem;
 use gl::Gl;
 use lazy_static::lazy_static;
-use render_gl::resources::ResourceManager;
-use scene::*;
+use render_gl::objects::BufferObject;
+use render_thread::{RenderState, RenderStateEvent};
+use resource_manager::ResourceManager;
 use std::{
     collections::HashMap,
     sync::{
@@ -23,13 +29,14 @@ use std::{
         Arc,
     },
 };
+use update_thread::{GameState, GameStateEvent};
 
 mod entity;
 mod events;
 mod interfaces;
 mod render_gl;
 mod render_thread;
-mod scene;
+mod resource_manager;
 mod systems;
 mod update_thread;
 mod utils;
@@ -66,9 +73,9 @@ pub fn main() {
         video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void
     });
     if CONFIG.performance.cap_render_fps {
-        video_subsystem.gl_set_swap_interval(1);
+        let _ = video_subsystem.gl_set_swap_interval(1);
     } else {
-        video_subsystem.gl_set_swap_interval(0);
+        let _ = video_subsystem.gl_set_swap_interval(0);
     }
 
     utils::setup_viewport(&gl, window.size());
@@ -99,8 +106,9 @@ pub fn main() {
         Sender<RenderStateEvent>,
         Receiver<RenderStateEvent>,
     ) = channel();
-    let (event_sender, event_receiver): (Sender<Event>, Receiver<Event>) = channel();
-    update_thread::updater(
+    let (event_sender, event_receiver): (Sender<GameStateEvent>, Receiver<GameStateEvent>) =
+        channel();
+    update_thread::spawn_update_loop(
         game_state,
         &resource_manager,
         render_state_sender,
@@ -131,6 +139,8 @@ fn create_state(gl: &Gl) -> (GameState, RenderState, ResourceManager) {
         command_queue: vec![],
         entities: EntitySystem::new(),
         running: true,
+        lights: Vec::with_capacity(8),
+        light_count: 0,
     };
 
     let mut render_state = RenderState {
@@ -139,6 +149,18 @@ fn create_state(gl: &Gl) -> (GameState, RenderState, ResourceManager) {
         models: HashMap::new(),
         entity_transforms: Box::new(vec![]),
         entity_generations: HashMap::new(),
+        lights_ubo: {
+            let mut ubo = BufferObject::new_immutable(
+                &gl,
+                gl::UNIFORM_BUFFER,
+                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+                24,
+            );
+            ubo.persistent_map(gl::WRITE_ONLY);
+            ubo
+        },
+        lights_dirty: true,
+        lights: Box::new(vec![]),
     };
 
     let resource_manager = ResourceManager::new();

@@ -1,11 +1,18 @@
-use crate::scene::RenderState;
+use crate::render_thread::RenderState;
 
-pub fn performance_stats_window(ui: &mut imgui::Ui, render_state: &RenderState, avg_fps: f32) {
+pub fn performance_stats_window(ui: &mut imgui::Ui, render_state: &RenderState, avg_dt: f32) {
     ui.window("Performance Stats")
         .size([300.0, 200.0], imgui::Condition::FirstUseEver)
         .position([1600.0, 20.0], imgui::Condition::FirstUseEver)
         .build(|| {
-            ui.text(format!("FPS (3 frame running average): {}", avg_fps));
+            ui.text(format!(
+                "FPS (3 frame running average): {}",
+                1000.0 / avg_dt
+            ));
+            ui.text(format!(
+                "Frame Time (3 frame running average): {}ms",
+                avg_dt
+            ));
             ui.separator();
 
             if let Some(cam) = render_state.camera.as_ref() {

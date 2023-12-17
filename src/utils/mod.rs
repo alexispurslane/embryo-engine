@@ -1,15 +1,20 @@
 use std::{cell::RefMut, ffi::CString};
 
 use gl::Gl;
+use glam::Vec4Swizzles;
 
 use crate::{
     entity::{
         camera_component::CameraComponent,
+        light_component::*,
         transform_component::{self, TransformComponent},
         Entity, EntitySystem,
     },
-    render_gl::shaders::Program,
-    scene::RenderCameraState,
+    render_gl::{
+        objects::{Buffer, BufferObject},
+        shaders::Program,
+    },
+    render_thread::{light_component_to_shader_light, RenderCameraState, RenderState, ShaderLight},
 };
 
 pub type Degrees = f32;
@@ -38,159 +43,6 @@ pub fn setup_viewport(gl: &Gl, (w, h): (u32, u32)) {
     }
 }
 
-pub mod shapes {
-    use crate::render_gl::data::VertexTex;
-
-    pub fn unit_cube() -> [VertexTex; 36] {
-        [
-            VertexTex {
-                pos: (-0.5, -0.5, -0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, -0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, -0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, -0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, -0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, 0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, 0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, 0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, 0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, 0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, -0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, 0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, -0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, 0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, -0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, -0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, 0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, -0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, -0.5).into(),
-                tex: (1.0, 1.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (0.5, 0.5, 0.5).into(),
-                tex: (1.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, 0.5).into(),
-                tex: (0.0, 0.0).into(),
-            },
-            VertexTex {
-                pos: (-0.5, 0.5, -0.5).into(),
-                tex: (0.0, 1.0).into(),
-            },
-        ]
-    }
-}
-
 pub fn camera_prepare_shader(program: &Program, camera: &RenderCameraState) {
     program.set_uniform_matrix_4fv(
         &CString::new("view_matrix").unwrap(),
@@ -200,6 +52,33 @@ pub fn camera_prepare_shader(program: &Program, camera: &RenderCameraState) {
         &CString::new("projection_matrix").unwrap(),
         &camera.proj.to_cols_array(),
     );
+}
+
+pub fn lights_prepare_shader(
+    gl: &Gl,
+    program: &Program,
+    lights_ubo: &mut BufferObject<ShaderLight>,
+    camera: &RenderCameraState,
+    lights: &[ShaderLight],
+    round_robin_buffer: usize,
+) {
+    lights_ubo.write_to_persistant_map(round_robin_buffer * 8, lights);
+    lights_ubo.bind();
+    unsafe {
+        gl.BindBufferBase(gl::UNIFORM_BUFFER, 0, lights_ubo.id);
+    }
+    program.set_uniform_3f(
+        &CString::new("cameraDirection").unwrap(),
+        (camera.view * glam::Vec4::Z).xyz().to_array().into(),
+    );
+    program.set_uniform_1ui(
+        &CString::new("lightoffset").unwrap(),
+        (round_robin_buffer * 8) as u32,
+    );
+}
+
+pub fn shader_set_lightmask(program: &Program, lightmask: u32) {
+    program.set_uniform_1ui(&CString::new("lightmask").unwrap(), lightmask);
 }
 
 #[macro_export]

@@ -141,6 +141,17 @@ impl Program {
         }
     }
 
+    pub fn set_uniform_1ui(&self, name: &CStr, b: u32) {
+        unsafe {
+            let loc = self.gl.GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                self.gl.Uniform1ui(loc, b as gl::types::GLuint);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
     pub fn set_uniform_1i(&self, name: &CStr, x: i32) {
         unsafe {
             let loc = self.gl.GetUniformLocation(self.id, name.as_ptr());
@@ -163,22 +174,22 @@ impl Program {
         }
     }
 
-    pub fn set_uniform_3f(&self, name: &CStr, x: f32, y: f32, z: f32) {
+    pub fn set_uniform_3f(&self, name: &CStr, vec: Cvec3) {
         unsafe {
             let loc = self.gl.GetUniformLocation(self.id, name.as_ptr());
             if loc != -1 {
-                self.gl.Uniform3f(loc, x, y, z);
+                self.gl.Uniform3f(loc, vec.d0, vec.d1, vec.d2);
             } else {
                 panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
             }
         }
     }
 
-    pub fn set_uniform_4f(&self, name: &CStr, x: f32, y: f32, z: f32, w: f32) {
+    pub fn set_uniform_4f(&self, name: &CStr, vec: Cvec4) {
         unsafe {
             let loc = self.gl.GetUniformLocation(self.id, name.as_ptr());
             if loc != -1 {
-                self.gl.Uniform4f(loc, x, y, z, w);
+                self.gl.Uniform4f(loc, vec.d0, vec.d1, vec.d2, vec.d3);
             } else {
                 panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
             }

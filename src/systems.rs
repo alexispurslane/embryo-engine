@@ -1,3 +1,4 @@
+use crate::entity::light_component::{Attenuation, LightComponent};
 use crate::entity::mesh_component::{MeshNode, Model, ModelComponent};
 use crate::entity::Entity;
 use crate::render_gl::data::InstanceTransformVertex;
@@ -13,10 +14,19 @@ use render_gl::shaders;
 
 pub fn load_shaders(gl: &Gl, render: &mut RenderState) {
     let vert_shader =
-        shaders::Shader::from_file(gl, "./data/shaders/camera.vert", gl::VERTEX_SHADER).unwrap();
+        shaders::Shader::from_file(gl, "./data/shaders/camera.vert", gl::VERTEX_SHADER)
+            .map_err(|e| {
+                println!("Could not compile vertex shader. Errors:\n{}", e);
+                std::process::exit(1);
+            })
+            .unwrap();
 
     let frag_shader =
         shaders::Shader::from_file(gl, "./data/shaders/material.frag", gl::FRAGMENT_SHADER)
+            .map_err(|e| {
+                println!("Could not compile fragment shader. Errors:\n{}", e);
+                std::process::exit(1);
+            })
             .unwrap();
     render
         .shader_programs
@@ -24,7 +34,7 @@ pub fn load_shaders(gl: &Gl, render: &mut RenderState) {
 }
 
 pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
-    let e = scene.entities.new_entity();
+    let e = scene.entities.gen_entity();
     scene.entities.add_component(
         e,
         TransformComponent::new_from_rot_trans(glam::Vec3::Y, glam::vec3(0.0, 0.0, -3.0), true),
@@ -33,12 +43,27 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         .entities
         .add_component(e, CameraComponent { fov: 90.0 });
     scene.camera = Some(e);
+    scene.entities.add_component(
+        e,
+        LightComponent::Spot {
+            color: glam::vec3(0.3, 0.5, 1.0),
+            ambient: glam::vec3(0.0, 0.2, 0.3),
+            cutoff: 0.5,
+            exponent: 3.0,
+            attenuation: Attenuation {
+                constant: 0.2,
+                linear: 0.2,
+                quadratic: 0.2,
+            },
+        },
+    );
+    scene.register_light(e);
 
     let mut trng = rand::thread_rng();
     let data = ["./data/models/heroine.glb"];
     let mut entities = vec![];
     for i in 0..10000 {
-        let thing = scene.entities.new_entity();
+        let thing = scene.entities.gen_entity();
         scene.entities.add_component(
             thing,
             ModelComponent {
@@ -111,67 +136,4 @@ pub fn integrate_loaded_models(
     resource_manager.try_integrate_loaded_models(&mut render.models, gl);
 }
 
-pub fn render(gl: &Gl, render: &mut RenderState, width: u32, height: u32) {
-    let camera = render.camera.as_ref().unwrap();
-    let mut last_shader_program_index = 0;
-    let mut program = &render.shader_programs[0];
-    program.set_used();
-    utils::camera_prepare_shader(program, camera);
-
-    let models = &mut render.models;
-    let egens = &render.entity_generations;
-    let etrans = &render.entity_transforms;
-    for (path, model) in models.iter_mut() {
-        if last_shader_program_index != model.shader_program {
-            program = &render.shader_programs[model.shader_program];
-            last_shader_program_index = model.shader_program;
-            program.set_used();
-            utils::camera_prepare_shader(program, camera);
-        }
-        // if the total number of entities changed, we need to totally reinitialize the buffer
-        let new_transforms = model
-                .entities
-                .iter()
-                .map(|entity| {
-                    RenderState::get_entity_transform(egens, etrans, *entity)
-                        .expect("Tried to render model for an entity that either doesn't have a transform component, or has been recycled.")
-                })
-                .map(|mat| InstanceTransformVertex::new(mat.to_cols_array()))
-                .collect::<Vec<InstanceTransformVertex>>();
-        let batches = (new_transforms.len() as u64).div_ceil(CONFIG.performance.max_batch_size);
-        let mbs = CONFIG.performance.max_batch_size as usize;
-        for batch in 0..batches {
-            let batch_start = batch as usize * mbs;
-            let batch_size = mbs.min(new_transforms.len() - batch_start) as usize;
-            model
-                .ibo
-                .as_mut()
-                .expect("Model must have an instance buffer object by the time rendering starts.")
-                .send_data(&new_transforms[batch_start..batch_start + batch_size], 0);
-
-            for mesh in &model.meshes {
-                for mesh in &mesh.primitives {
-                    let mesh_gl = mesh
-                        .gl_mesh
-                        .as_ref()
-                        .expect("Model must have OpenGL elements setup before rendering it, baka!");
-                    mesh_gl.vao.bind();
-
-                    let material = &model.materials[mesh.material_index];
-                    material.activate(&model, &program);
-
-                    mesh_gl.vao.draw_elements_instanced(
-                        gl::TRIANGLES,
-                        mesh_gl.ebo.count() as gl::types::GLint,
-                        gl::UNSIGNED_INT,
-                        0,
-                        batch_size as gl::types::GLint,
-                    );
-                    mesh_gl.vao.unbind();
-                }
-            }
-        }
-    }
-}
-
-pub fn physics(scene: &mut GameState, dt: u128) {}
+pub fn physics(game_state: &mut GameState, dt: u128) {}

@@ -10,6 +10,7 @@ uniform mat4 view_matrix;
 uniform mat4 projection_matrix;
 
 out VS_OUT {
+    vec4 position;
     vec3 normal;
     vec2 texCoord;
     vec4 tangent;
@@ -18,6 +19,7 @@ out VS_OUT {
 void main()
     {
         gl_Position = projection_matrix * view_matrix * model_matrix * vec4(aPos, 1.0);
+        vs_out.position = model_matrix * vec4(aPos, 1.0);
         vs_out.texCoord = aTexCoord;
         vs_out.normal = aNormal;
         vs_out.tangent = aTangent;

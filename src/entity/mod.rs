@@ -9,6 +9,7 @@ use crate::systems;
 use self::mesh_component::ModelComponent;
 
 pub mod camera_component;
+pub mod light_component;
 pub mod mesh_component;
 pub mod terrain_component;
 pub mod transform_component;
@@ -70,7 +71,7 @@ impl EntitySystem {
         }
     }
 
-    pub fn new_entity(&mut self) -> Entity {
+    pub fn gen_entity(&mut self) -> Entity {
         let e = if let Some(eid) = self.free_entities.pop() {
             Entity {
                 id: eid,

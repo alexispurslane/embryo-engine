@@ -17,6 +17,9 @@ impl Cvec2 {
     pub fn new(d0: f32, d1: f32) -> Cvec2 {
         Cvec2 { d0, d1 }
     }
+    pub fn zero() -> Self {
+        Self { d0: 0.0, d1: 0.0 }
+    }
 }
 
 impl VertexAttribute for Cvec2 {
@@ -40,6 +43,12 @@ impl From<(f32, f32)> for Cvec2 {
     }
 }
 
+impl From<[f32; 2]> for Cvec2 {
+    fn from(other: [f32; 2]) -> Self {
+        Cvec2::new(other[0], other[1])
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct Cvec3 {
@@ -51,6 +60,32 @@ pub struct Cvec3 {
 impl Cvec3 {
     pub fn new(d0: f32, d1: f32, d2: f32) -> Cvec3 {
         Cvec3 { d0, d1, d2 }
+    }
+
+    pub fn zero() -> Self {
+        Self {
+            d0: 0.0,
+            d1: 0.0,
+            d2: 0.0,
+        }
+    }
+
+    pub fn from_glam(v: glam::Vec3) -> Self {
+        Self {
+            d0: v.x,
+            d1: v.y,
+            d2: v.z,
+        }
+    }
+}
+
+impl From<[f32; 3]> for Cvec3 {
+    fn from(value: [f32; 3]) -> Self {
+        Self {
+            d0: value[0],
+            d1: value[1],
+            d2: value[2],
+        }
     }
 }
 
@@ -87,6 +122,26 @@ pub struct Cvec4 {
 impl Cvec4 {
     pub fn new(d0: f32, d1: f32, d2: f32, d3: f32) -> Self {
         Cvec4 { d0, d1, d2, d3 }
+    }
+
+    pub fn zero() -> Self {
+        Self {
+            d0: 0.0,
+            d1: 0.0,
+            d2: 0.0,
+            d3: 0.0,
+        }
+    }
+}
+
+impl From<[f32; 4]> for Cvec4 {
+    fn from(value: [f32; 4]) -> Self {
+        Self {
+            d0: value[0],
+            d1: value[1],
+            d2: value[2],
+            d3: value[3],
+        }
     }
 }
 

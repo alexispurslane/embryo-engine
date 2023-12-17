@@ -74,7 +74,7 @@ impl TransformComponent {
     pub fn point_of_view(&self) -> glam::Mat4 {
         let Transform { trans: pos, rot } = self.transform;
         let direction = rot * glam::Vec3::Z;
-        glam::Mat4::look_at_rh(pos, pos + direction, rot * glam::Vec3::Y)
+        glam::Mat4::look_to_rh(pos, direction, rot * glam::Vec3::Y)
     }
 
     pub fn get_matrix(&mut self) -> glam::Mat4 {
