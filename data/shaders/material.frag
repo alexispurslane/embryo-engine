@@ -36,7 +36,7 @@ struct Light {
 };
 
 layout (binding = 0, std140) uniform Lights {
-    Light lights[8];
+    Light lights[96];
 };
 
 uniform uint lightmask;

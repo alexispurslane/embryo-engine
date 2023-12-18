@@ -134,35 +134,8 @@ pub fn main() {
 }
 
 fn create_state(gl: &Gl) -> (GameState, RenderState, ResourceManager) {
-    let mut game_state = GameState {
-        camera: None,
-        command_queue: vec![],
-        entities: EntitySystem::new(),
-        running: true,
-        lights: Vec::with_capacity(8),
-        light_count: 0,
-    };
-
-    let mut render_state = RenderState {
-        camera: None,
-        shader_programs: vec![],
-        models: HashMap::new(),
-        entity_transforms: Box::new(vec![]),
-        entity_generations: HashMap::new(),
-        lights_ubo: {
-            let mut ubo = BufferObject::new_immutable(
-                &gl,
-                gl::UNIFORM_BUFFER,
-                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-                24,
-            );
-            ubo.persistent_map(gl::WRITE_ONLY);
-            ubo
-        },
-        lights_dirty: true,
-        lights: Box::new(vec![]),
-    };
-
+    let mut game_state = GameState::new();
+    let mut render_state = RenderState::new(gl);
     let resource_manager = ResourceManager::new();
 
     systems::load_shaders(&gl, &mut render_state);

@@ -29,9 +29,9 @@ use glam::Vec4Swizzles;
 
 pub struct RenderStateEvent {
     pub camera: Option<RenderCameraState>,
-    pub entity_generations: HashMap<EntityID, usize>,
-    pub entity_transforms: Box<Vec<Option<glam::Mat4>>>,
-    pub lights: Box<Vec<ShaderLight>>,
+    pub entity_generations: Option<HashMap<EntityID, usize>>,
+    pub entity_transforms: Option<Box<Vec<Option<glam::Mat4>>>>,
+    pub lights: Option<Box<Vec<ShaderLight>>>,
 }
 
 pub struct RenderCameraState {
@@ -51,6 +51,44 @@ pub struct RenderState {
 }
 
 impl RenderState {
+    pub fn new(gl: &Gl) -> Self {
+        RenderState {
+            camera: None,
+            shader_programs: vec![],
+            models: HashMap::new(),
+            entity_transforms: Box::new(vec![]),
+            entity_generations: HashMap::new(),
+            lights_ubo: {
+                let mut ubo = BufferObject::new_immutable(
+                    &gl,
+                    gl::UNIFORM_BUFFER,
+                    gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+                    CONFIG.performance.max_lights * 3,
+                );
+                ubo.persistent_map(gl::WRITE_ONLY);
+                ubo
+            },
+            lights_dirty: true,
+            lights: Box::new(vec![]),
+        }
+    }
+
+    pub fn merge_changes(&mut self, new_render_state: RenderStateEvent) {
+        if let Some(new_cam) = new_render_state.camera {
+            self.camera = Some(new_cam);
+        }
+        if let Some(new_gens) = new_render_state.entity_generations {
+            self.entity_generations = new_gens;
+        }
+        if let Some(new_trans) = new_render_state.entity_transforms {
+            self.entity_transforms = new_trans;
+        }
+        if let Some(new_lights) = new_render_state.lights {
+            self.lights = new_lights;
+            self.lights_dirty = true;
+        }
+    }
+
     pub fn get_entity_transform<'a>(
         entity_generations: &'a HashMap<EntityID, usize>,
         entity_transforms: &'a Vec<Option<glam::Mat4>>,
@@ -104,11 +142,7 @@ pub fn renderer(
         let mut event_pump = sdl_context.event_pump().unwrap();
         let mouse_util = sdl_context.mouse();
         if let Ok(new_render_state) = render_state_receiver.try_recv() {
-            render_state.camera = new_render_state.camera;
-            render_state.entity_generations = new_render_state.entity_generations;
-            render_state.entity_transforms = new_render_state.entity_transforms;
-            render_state.lights = new_render_state.lights;
-            render_state.lights_dirty = true;
+            render_state.merge_changes(new_render_state);
         }
 
         if lag > CONFIG.performance.update_interval as u128 {
@@ -180,7 +214,7 @@ pub fn render(gl: &Gl, render: &mut RenderState, round_robin_buffer: usize) {
         &render.lights,
         round_robin_buffer,
     );
-    utils::shader_set_lightmask(&program, 0b00000001);
+    utils::shader_set_lightmask(&program, 0b11111111111111111111111111111111);
 
     // Loop through each model and render all instances of it, in batches.
     let models = &mut render.models;
@@ -227,7 +261,9 @@ pub fn render(gl: &Gl, render: &mut RenderState, round_robin_buffer: usize) {
                 .collect::<Vec<InstanceTransformVertex>>();
 
         // See how many batches we're gonna have to do
-        let batches = (new_transforms.len() as u64).div_ceil(CONFIG.performance.max_batch_size);
+        let batches = new_transforms
+            .len()
+            .div_ceil(CONFIG.performance.max_batch_size);
         let mbs = CONFIG.performance.max_batch_size as usize;
 
         for batch in 0..batches {

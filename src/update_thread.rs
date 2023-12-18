@@ -37,13 +37,30 @@ pub enum GameStateEvent {
     ),
 }
 
+struct GameStateDiff {
+    camera_changed: bool,
+    lights_changed: bool,
+    command_queue_changed: bool,
+    entities_changed: bool,
+}
+
+impl GameStateDiff {
+    pub fn any_changed(&self) -> bool {
+        self.camera_changed
+            || self.lights_changed
+            || self.command_queue_changed
+            || self.entities_changed
+    }
+}
+
 pub struct GameState {
-    pub camera: Option<Entity>,
-    pub lights: Vec<Entity>,
-    pub light_count: usize,
-    pub command_queue: Vec<SceneCommand>,
-    pub entities: EntitySystem,
-    pub running: bool,
+    camera: Option<Entity>,
+    lights: Vec<Entity>,
+    light_count: usize,
+    command_queue: Vec<SceneCommand>,
+    entities: EntitySystem,
+    running: bool,
+    changed_diff: GameStateDiff,
 }
 // NOTE: Same logic as for the Send implementation for Model: I will never be
 // sending this anywhere where OpenGL functions will be called, since the
@@ -56,14 +73,54 @@ unsafe impl Send for GameState {}
 unsafe impl Sync for GameState {}
 
 impl GameState {
+    pub fn new() -> Self {
+        Self {
+            camera: None,
+            command_queue: vec![],
+            entities: EntitySystem::new(),
+            running: true,
+            lights: Vec::with_capacity(CONFIG.performance.max_lights),
+            light_count: 0,
+            changed_diff: GameStateDiff {
+                camera_changed: true,
+                lights_changed: true,
+                command_queue_changed: true,
+                entities_changed: true,
+            },
+        }
+    }
+
+    pub fn entities(&self) -> &EntitySystem {
+        &self.entities
+    }
+
+    pub fn entities_mut(&mut self) -> &mut EntitySystem {
+        self.changed_diff.entities_changed = true;
+        &mut self.entities
+    }
+
+    pub fn camera(&self) -> &Option<Entity> {
+        &self.camera
+    }
+
+    pub fn lights(&self) -> &Vec<Entity> {
+        &self.lights
+    }
+
     /// Adds an entity to the list of entities we're treating as active light sources. If this would overflow the list of entities, it just rotates them.
     pub fn register_light(&mut self, e: Entity) {
-        if self.lights.len() < 8 {
+        self.changed_diff.lights_changed = true;
+        if self.lights.len() < CONFIG.performance.max_lights {
             self.lights.push(e);
         } else {
             self.lights[self.light_count] = e;
         }
-        self.light_count = (self.light_count + 1) % 8;
+        self.light_count = (self.light_count + 1) % CONFIG.performance.max_lights;
+    }
+
+    pub fn register_camera(&mut self, e: Entity) {
+        self.changed_diff.camera_changed = true;
+        self.camera = Some(e);
     }
 
     /// Queue world state changes
@@ -74,7 +131,7 @@ impl GameState {
     pub fn move_camera_by_vector(&mut self, d: Direction, dt: u128) {
         let camera_entity = self.camera.expect("No camera found");
         let mut camera_transform = self
-            .entities
+            .entities_mut()
             .get_component_mut::<TransformComponent>(camera_entity)
             .expect("Camera needs to have TransformComponent");
 
@@ -84,7 +141,7 @@ impl GameState {
     pub fn rotate_camera(&mut self, pyr: PitchYawRoll, dt: u128) {
         let camera_entity = self.camera.expect("No camera found");
         let mut camera_transform = self
-            .entities
+            .entities_mut()
             .get_component_mut::<TransformComponent>(camera_entity)
             .expect("Camera needs to have TransformComponent");
 
@@ -92,7 +149,7 @@ impl GameState {
     }
 
     pub fn displace_entity(&mut self, entity: Entity, rel_vec: glam::Vec3) {
-        self.entities
+        self.entities_mut()
             .get_component_mut::<TransformComponent>(entity)
             .expect("Displaced entity must have transform component")
             .displace_by(rel_vec);
@@ -162,52 +219,82 @@ pub fn spawn_update_loop(
                             events::handle_event(&mut game_state, event, lag);
                         }
                     }
-                    let cam = {
-                        let camera = game_state.camera.expect("Must have camera");
-                        let cc = game_state
-                            .entities
-                            .get_component::<CameraComponent>(camera)
-                            .expect("Camera must still exist and have camera component!");
-                        let ct = game_state
-                            .entities
-                            .get_component::<TransformComponent>(camera)
-                            .expect("Camera must still exist and have transform component!");
 
-                        RenderCameraState {
-                            view: ct.point_of_view(),
-                            proj: cc.project(width, height),
-                        }
-                    };
-                    let matrices = {
-                        game_state
-                            .entities
-                            .get_component_vec_mut::<TransformComponent>()
-                            .iter_mut()
-                            .map(|opt_tc| opt_tc.as_mut().map(|tc| tc.get_matrix().clone()))
-                            .collect()
-                    };
-                    let _ = render_state_sender.send(RenderStateEvent {
-                        camera: Some(cam),
-                        entity_generations: game_state.entities.current_entity_generations.clone(),
-                        entity_transforms: Box::new(matrices),
-                        lights: Box::new(
-                            game_state
-                                .lights
-                                .iter()
-                                .map(|e| {
-                                    let lc = game_state
-                                        .entities
-                                        .get_component::<LightComponent>(*e)
-                                        .unwrap();
-                                    let tc = game_state
-                                        .entities
-                                        .get_component::<TransformComponent>(*e)
-                                        .unwrap();
-                                    light_component_to_shader_light(&lc, &tc)
+                    if game_state.changed_diff.any_changed() {
+                        let cam = {
+                            if game_state.changed_diff.camera_changed {
+                                let camera = game_state.camera.expect("Must have camera");
+                                let cc = game_state
+                                    .entities
+                                    .get_component::<CameraComponent>(camera)
+                                    .expect("Camera must still exist and have camera component!");
+                                let ct = game_state
+                                    .entities
+                                    .get_component::<TransformComponent>(camera)
+                                    .expect(
+                                        "Camera must still exist and have transform component!",
+                                    );
+
+                                Some(RenderCameraState {
+                                    view: ct.point_of_view(),
+                                    proj: cc.project(width, height),
                                 })
-                                .collect(),
-                        ),
-                    });
+                            } else {
+                                None
+                            }
+                        };
+                        let matrices = {
+                            if game_state.changed_diff.entities_changed {
+                                // We DON'T use the entities_mut() command here
+                                // because if we did, it would lead to a degenerate
+                                // loop of stuff being marked changed every frame
+                                // once the first change happens
+                                Some(
+                                    game_state
+                                        .entities
+                                        .get_component_vec_mut::<TransformComponent>()
+                                        .iter_mut()
+                                        .map(|opt_tc| {
+                                            opt_tc.as_mut().map(|tc| tc.get_matrix().clone())
+                                        })
+                                        .collect(),
+                                )
+                            } else {
+                                None
+                            }
+                        };
+                        let lights = {
+                            if game_state.changed_diff.lights_changed {
+                                Some(
+                                    game_state
+                                        .lights
+                                        .iter()
+                                        .map(|e| {
+                                            let lc = game_state
+                                                .entities
+                                                .get_component::<LightComponent>(*e)
+                                                .unwrap();
+                                            let tc = game_state
+                                                .entities
+                                                .get_component::<TransformComponent>(*e)
+                                                .unwrap();
+                                            light_component_to_shader_light(&lc, &tc)
+                                        })
+                                        .collect(),
+                                )
+                            } else {
+                                None
+                            }
+                        };
+                        let _ = render_state_sender.send(RenderStateEvent {
+                            camera: cam,
+                            entity_generations: Some(
+                                game_state.entities.current_entity_generations.clone(),
+                            ),
+                            entity_transforms: matrices.map(|x| Box::new(x)),
+                            lights: lights.map(|x| Box::new(x)),
+                        });
+                    }
                     if CONFIG.performance.cap_update_fps {
                         let sleep_time = interval.checked_sub(dt).unwrap_or(0);
                         if sleep_time > 0 {
