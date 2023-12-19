@@ -27,7 +27,7 @@ pub enum LightComponent {
         color: glam::Vec3,
         ambient: glam::Vec3,
         cutoff: f32,
-        exponent: f32,
+        fade_exponent: f32,
         attenuation: Attenuation,
     },
 }

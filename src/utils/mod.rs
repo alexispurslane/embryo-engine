@@ -66,15 +66,20 @@ pub fn lights_prepare_shader(
     lights_ubo.write_to_persistant_map(round_robin_buffer * CONFIG.performance.max_lights, lights);
     lights_ubo.bind();
     unsafe {
-        gl.BindBufferBase(gl::UNIFORM_BUFFER, 0, lights_ubo.id);
+        gl.BindBufferRange(
+            gl::UNIFORM_BUFFER,
+            0,
+            lights_ubo.id,
+            (round_robin_buffer
+                * CONFIG.performance.max_lights
+                * std::mem::size_of::<ShaderLight>()) as gl::types::GLintptr,
+            (CONFIG.performance.max_lights * std::mem::size_of::<ShaderLight>())
+                as gl::types::GLsizeiptr,
+        );
     }
     program.set_uniform_3f(
         &CString::new("cameraDirection").unwrap(),
         (camera.view * glam::Vec4::Z).xyz().to_array().into(),
-    );
-    program.set_uniform_1ui(
-        &CString::new("lightoffset").unwrap(),
-        (round_robin_buffer * CONFIG.performance.max_lights) as u32,
     );
 }
 
@@ -107,6 +112,8 @@ pub mod config {
         pub cap_render_fps: bool,
         pub max_batch_size: usize,
         pub max_lights: usize,
+        pub max_quadtree_depth: usize,
+        pub max_quadtree_entities: usize,
     }
 
     #[derive(Deserialize)]
@@ -139,6 +146,8 @@ cap_render_fps = true
 cap_update_fps = true
 max_batch_size = 1000
 max_lights = 32
+max_quadtree_depth = 6
+max_quadtree_entities = 30
 
 [controls]
 mouse_sensitivity = 1.0
@@ -154,9 +163,307 @@ motion_speed = 10.0
             || (config.performance.max_lights > 32 || config.performance.max_lights < 1)
             || config.controls.mouse_sensitivity < 1.0
             || config.controls.motion_speed <= 0.0
+            || config.performance.max_quadtree_depth < 4
+            || config.performance.max_quadtree_entities < 10
+            || config.performance.max_quadtree_entities > 1000
         {
             panic!("Invalid values in config file.");
         }
         config
+    }
+}
+
+pub mod quadtree {
+    use std::collections::VecDeque;
+
+    use glam::Vec2Swizzles;
+
+    use crate::{entity::Entity, CONFIG};
+
+    #[derive(Clone)]
+    pub struct QuadtreeEntity {
+        entity: Entity,
+        upper_left: (usize, usize),
+        bb_size: (usize, usize),
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum QuadtreeNodeType {
+        Interior,
+        Leaf,
+    }
+
+    #[derive(Clone)]
+    pub struct QuadtreeNode {
+        node_type: QuadtreeNodeType,
+        /// center relative to parent
+        half_size: (usize, usize),
+        center: (usize, usize),
+        entities: Vec<QuadtreeEntity>,
+    }
+
+    impl QuadtreeNode {
+        pub fn new(half_size: (usize, usize), center: (usize, usize)) -> Self {
+            Self {
+                node_type: QuadtreeNodeType::Leaf,
+                half_size,
+                center,
+                entities: Vec::with_capacity(CONFIG.performance.max_quadtree_entities),
+            }
+        }
+    }
+
+    /// clockwise constant size array quadtree
+    pub struct Quadtree {
+        pub map_width: usize,
+        pub map_height: usize,
+        pub nodes: Vec<QuadtreeNode>,
+    }
+
+    impl Quadtree {
+        pub fn new(map_width: usize, map_height: usize) -> Self {
+            let size = 4_u32.pow(CONFIG.performance.max_quadtree_depth as u32) as usize;
+            let mut tree = Self {
+                map_width,
+                map_height,
+                nodes: Vec::with_capacity(size),
+            };
+            tree.nodes[0] = QuadtreeNode::new(
+                (map_width / 2, map_height / 2),
+                (map_width / 2, map_height / 2),
+            );
+
+            let mut frontier = VecDeque::from([0]);
+            while let Some(node_index) = frontier.pop_front() {
+                if let Some(QuadtreeNode {
+                    half_size, center, ..
+                }) = tree.nodes.get(node_index).cloned()
+                // FIXME: this is an inefficient way to get around the borrow checker
+                {
+                    // Top left
+                    tree.nodes.push(QuadtreeNode::new(
+                        (half_size.0 / 2, half_size.1 / 2),
+                        (center.0 / 2, center.1 + center.1 / 2),
+                    ));
+                    frontier.push_back(4 * node_index);
+
+                    // Top right
+                    tree.nodes.push(QuadtreeNode::new(
+                        (half_size.0 / 2, half_size.1 / 2),
+                        (center.0 + center.0 / 2, center.1 + center.1 / 2),
+                    ));
+                    frontier.push_back(4 * node_index + 1);
+
+                    // Bottom right
+                    tree.nodes.push(QuadtreeNode::new(
+                        (half_size.0 / 2, half_size.1 / 2),
+                        (center.0 + center.0 / 2, center.1 / 2),
+                    ));
+                    frontier.push_back(4 * node_index + 1);
+
+                    // Bottom left
+                    tree.nodes.push(QuadtreeNode::new(
+                        (half_size.0 / 2, half_size.1 / 2),
+                        (center.0 / 2, center.1 / 2),
+                    ));
+                    frontier.push_back(4 * node_index + 1);
+                }
+            }
+            tree
+        }
+
+        pub fn insert(
+            &mut self,
+            entity @ QuadtreeEntity {
+                upper_left: (px, py),
+                bb_size: (bbw, bbh),
+                ..
+            }: QuadtreeEntity,
+            start_node: usize,
+        ) {
+            let mut current_node = start_node;
+            while current_node < self.nodes.len() {
+                if current_node == self.nodes.len() - 1 {
+                    // We've reached capacity, just add the node here. What can ya do.
+                    self.nodes[current_node].entities.push(entity);
+                    break;
+                }
+
+                let QuadtreeNode {
+                    node_type,
+                    half_size,
+                    center,
+                    entities,
+                } = &self.nodes[current_node];
+
+                if *node_type == QuadtreeNodeType::Interior {
+                    // Still need to find a home
+                    let (cx, cy) = self.nodes[current_node].center;
+
+                    if px < cx && px + bbw > cx || py < cy && py + bbh > cy {
+                        // If we cross either the x or y plan splitting this
+                        // quad, then we have to stay at this level
+                        self.nodes[current_node].entities.push(entity);
+                        break;
+                    }
+
+                    if px <= cx && py >= cy {
+                        current_node = 4 * current_node;
+                    } else if px >= cx && py >= cy {
+                        current_node = 4 * current_node + 1;
+                    } else if px >= cx && py <= cy {
+                        current_node = 4 * current_node + 2;
+                    } else if px <= cx && py <= cy {
+                        current_node = 4 * current_node + 3;
+                    }
+                } else {
+                    if self.nodes[current_node].entities.len()
+                        < CONFIG.performance.max_quadtree_entities
+                    {
+                        // There aren't many nodes here yet, so no need to split.
+                        self.nodes[current_node].entities.push(entity.clone());
+                    } else if self.nodes[current_node].entities.len()
+                        == CONFIG.performance.max_quadtree_entities
+                    {
+                        // Break all the entities out to lower nodes
+                        self.nodes[current_node].node_type = QuadtreeNodeType::Interior;
+                        let entities: Vec<_> = self.nodes[current_node]
+                            .entities
+                            .drain(0..CONFIG.performance.max_quadtree_entities)
+                            .collect();
+                        for e in entities {
+                            self.insert(e, current_node);
+                        }
+
+                        // Continue the search next loop, starting at the same node!
+                    }
+                }
+            }
+        }
+
+        pub fn raycast_find_entities(
+            &self,
+            (p, v): (glam::Vec2, glam::Vec2),
+        ) -> Vec<&QuadtreeEntity> {
+            let mut entities_acc = vec![];
+            let mut frontier = VecDeque::from([0]);
+            while let Some(node_index) = frontier.pop_front() {
+                if self.nodes[node_index].node_type == QuadtreeNodeType::Interior {
+                    let QuadtreeNode {
+                        half_size,
+                        center: (dx, dy),
+                        ref entities,
+                        ..
+                    } = self.nodes[node_index];
+
+                    let children = [
+                        4 * node_index,
+                        4 * node_index + 1,
+                        4 * node_index + 2,
+                        4 * node_index + 3,
+                    ];
+                    // Next nodes to search
+
+                    // Find intersection with x plane
+                    let tx = -(glam::Vec2::Y.dot(p) + dy as f32) / glam::Vec2::Y.dot(v);
+                    let intersect_x = p + tx * v;
+                    let intersects_x_plane = dx - half_size.1 <= intersect_x.x as usize
+                        && intersect_x.x as usize <= dx + half_size.1;
+
+                    // Find intersection with y plane
+                    let ty = -(glam::Vec2::X.dot(p) + dx as f32) / glam::Vec2::Y.dot(v);
+                    let intersect_y = p + ty * v;
+                    let intersects_y_plane =
+                        dy <= intersect_y.y as usize && intersect_y.y as usize <= dy + half_size.1;
+
+                    // if the ray goes through me, it's worth exploring my children
+                    if intersects_x_plane || intersects_y_plane {
+                        entities_acc.extend(entities);
+                        frontier.extend(children);
+                    } else {
+                        // If it doesn't it won't go through any of my chilren either.
+                        continue;
+                    }
+                }
+            }
+            entities_acc
+        }
+
+        pub fn find_likely_collisions(
+            &self,
+            QuadtreeEntity {
+                upper_left: (px, py),
+                bb_size: (bbw, bbh),
+                ..
+            }: QuadtreeEntity,
+        ) -> Vec<&QuadtreeEntity> {
+            let mut entities = vec![];
+            let mut frontier = VecDeque::from([0]);
+            while let Some(node_index) = frontier.pop_front() {
+                // Still need to find a home
+                entities.extend(&self.nodes[node_index].entities);
+
+                if self.nodes[node_index].node_type == QuadtreeNodeType::Interior {
+                    let (cx, cy) = self.nodes[node_index].center;
+                    let children = [
+                        4 * node_index,
+                        4 * node_index + 1,
+                        4 * node_index + 2,
+                        4 * node_index + 3,
+                    ];
+                    // Next nodes to search
+                    if px < cx && py > cy {
+                        frontier.push_back(children[0]);
+
+                        if px + bbw > cx {
+                            frontier.push_back(children[1]);
+                        }
+                    } else if px > cx && py > cy {
+                        frontier.push_back(children[1]);
+                    } else if px > cx && py < cy {
+                        frontier.push_back(children[2]);
+
+                        if py + bbh > cy {
+                            frontier.push_back(children[1]);
+                        }
+                    } else if px < cx && py < cy {
+                        frontier.push_back(children[3]);
+
+                        if px + bbw > cx {
+                            frontier.push_back(children[2]);
+                        }
+
+                        if py + bbh > cy {
+                            frontier.push_back(children[0]);
+                        }
+                    }
+                }
+            }
+
+            entities
+        }
+    }
+}
+
+pub mod primitives {
+    use crate::{
+        lazy_static,
+        render_gl::data::{VertexPos, VertexTex},
+    };
+    lazy_static! {
+        pub static ref QUAD: Vec<VertexPos> = vec![
+            VertexPos {
+                pos: [-1.0, 1.0, 0.0].into(),
+            },
+            VertexPos {
+                pos: [-1.0, -1.0, 0.0].into(),
+            },
+            VertexPos {
+                pos: [1.0, 1.0, 0.0].into(),
+            },
+            VertexPos {
+                pos: [1.0, -1.0, 0.0].into(),
+            },
+        ];
     }
 }

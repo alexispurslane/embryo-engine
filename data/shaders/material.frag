@@ -36,11 +36,10 @@ struct Light {
 };
 
 layout (binding = 0, std140) uniform Lights {
-    Light lights[96];
+    Light lights[32];
 };
 
 uniform uint lightmask;
-uniform uint lightoffset;
 uniform vec3 cameraDirection;
 
 vec3 scatteredLight = vec3(0.0); // ambient and diffuse, color is a mix of object and light
@@ -124,8 +123,8 @@ void spotLight(
 
     if (spotCos < cutoff)
         attenuation = 0.0;
-    else
-        attenuation *= pow(spotCos, spotExp);
+    //else
+        //attenuation *= pow(spotCos, spotExp);
 
     float intensity = 1.0 - (1.0 - spotCos)/(1.0 - cutoff);
 
@@ -149,7 +148,7 @@ void main()
     uint index = 0;
     while ((lightmask_ = lightmask_ >> 1) != 0) {
         if ((lightmask_ & 1) == 1) {
-            Light light = lights[lightoffset + index];
+            Light light = lights[index];
             switch (light.type) {
                 case Directional:
                     directionalLight(light.ambient, light.direction, light.color);
@@ -185,6 +184,6 @@ void main()
     if (specularIsTexture)
         strength = texture(specularTexture, fs_in.texCoord).xyz;
 
-    vec3 rgb = min(vec3(1.0), color.rgb * scatteredLight + reflectedLight * strength);
+    vec3 rgb = color.rgb * scatteredLight + reflectedLight * strength;
     FragColor = vec4(rgb, color.a);
 }

@@ -1,0 +1,54 @@
+#version 430
+
+#define GROUP_SIZE 256
+
+#define EPSILON 0.005
+#define RGB_TO_LUM vec3(0.2125, 0.7154, 0.0721)
+
+uniform vec4 params;
+// params.x = minimum log_2 luminance
+// params.y = inverse of the log_2 luminance range
+
+layout (binding = 0, rgba16f) uniform image2D hdrImage;
+layout (binding = 1, std140) buffer Histogram {
+    uint histogram[256];
+};
+
+shared uint histogramShared[GROUP_SIZE];
+
+uint colorToBin(vec3 hdrColor, float minLogLum, float inverseLogLumRange) {
+    float lum = dot(hdrColor, RGB_TO_LUM);
+
+    if (lum < EPSILON) {
+        return 0;
+    }
+
+    float logLum = clamp((log2(lum) - minLogLum) * inverseLogLumRange, 0.0, 1.0);
+
+    return uint(logLum * 254.0 + 1.0);
+}
+
+layout (local_size_x = 16, local_size_y = 16) in;
+void main() {
+    histogramShared[gl_LocalInvocationIndex] = 0;
+    barrier();
+
+    uvec2 dim = imageSize(hdrImage).xy;
+
+    if (gl_GlobalInvocationID.x < dim.x && gl_GlobalInvocationID.y < dim.y) {
+        vec3 hdrColor = imageLoad(hdrImage, ivec2(gl_GlobalInvocationID.xy)).xyz;
+        uint binIndex = colorToBin(hdrColor, params.x, params.y);
+
+        atomicAdd(histogramShared[binIndex], 1);
+    }
+
+    barrier();
+
+    // Each thread in the local group adds *one* of the values from the local
+    // work group's shared pile to the global work group's finished pile. Not
+    // one associated with it, necessarily, it's not "each thread is responsible
+    // for a particular color", it's just that we happen to have 256 threads and
+    // 256 bins, so we can have each store one and get all the values, while
+    // avoiding looping and sync issues
+    atomicAdd(histogram[gl_LocalInvocationIndex], histogramShared[gl_LocalInvocationIndex]);
+}

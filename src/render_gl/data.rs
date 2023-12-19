@@ -213,11 +213,9 @@ impl InstanceTransformVertex {
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]
 #[repr(C, packed)]
-pub struct VertexRGB {
+pub struct VertexPos {
     #[location = 0]
     pub pos: Cvec3,
-    #[location = 1]
-    pub clr: Cvec3,
 }
 
 #[derive(VertexAttribPointers, Copy, Clone, Debug)]
@@ -225,7 +223,7 @@ pub struct VertexRGB {
 pub struct VertexTex {
     #[location = 0]
     pub pos: Cvec3,
-    #[location = 2]
+    #[location = 1]
     pub tex: Cvec2,
 }
 

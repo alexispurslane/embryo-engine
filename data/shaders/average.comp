@@ -1,0 +1,41 @@
+#version 430
+
+#define GROUP_SIZE 256
+
+uniform vec4 params;
+// params.x = minLogLum
+// params.y = logLumRange
+// param.z = timeCoeff
+// param.w = numPixels
+
+layout (binding = 0, r16f) uniform image1D target;
+layout (binding = 1, std140) buffer Histogram {
+    uint histogram[256];
+};
+
+shared uint histogramShared[GROUP_SIZE];
+
+layout (local_size_x = 256, local_size_y = 1) in;
+void main() {
+    uint countForThisBin = histogram[gl_LocalInvocationIndex];
+    histogramShared[gl_LocalInvocationIndex] = countForThisBin * gl_LocalInvocationIndex;
+
+    barrier();
+
+    histogram[gl_LocalInvocationIndex] = 0;
+
+    #pragma unroll
+    for (uint cutoff = (GROUP_SIZE >> 1); cutoff > 0; cutoff >>= 1) {
+        if (uint(gl_LocalInvocationIndex) < cutoff)
+            histogramShared[gl_LocalInvocationIndex] += histogramShared[gl_LocalInvocationIndex + cutoff];
+        barrier();
+    }
+
+    if (gl_LocalInvocationIndex == 0) {
+        float weightedLogAverage = (histogramShared[0] / max(params.w - float(countForThisBin), 1.0)) - 1.0;
+        float weightedAvgLum = exp2(((weightedLogAverage / 254.0) * params.y) + params.x);
+        float lumLastFrame = imageLoad(target, 0).x;
+        float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * params.z;
+        imageStore(target, 0, vec4(adaptedLum, 0.0, 0.0, 0.0));
+    }
+}

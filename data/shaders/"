@@ -1,0 +1,32 @@
+#version 430 core
+
+#define RGB_TO_LUM vec3(0.2125, 0.7154, 0.0721)
+
+layout (binding = 0, r16f) uniform readonly image1D lumAvg;
+layout (binding = 1, rgba16f) uniform readonly image2D hdrImage;
+
+uniform vec4 params;
+// params.x = L_white
+
+out vec4 FragColor;
+
+float curve(float L_in) {
+    float simple = L_in / (1.0 + L_in);
+    float extended = simple * (1.0 + L_in / (params.x * params.x));
+    return extended;
+}
+
+vec3 tone_mapping_y(vec3 C_in, float L_avg) {
+    float L_in = dot(C_in, RGB_TO_LUM);
+    float L_prime = L_in / (9.6 * L_avg);
+    return C_in * vec3(curve(L_prime) / L_prime);
+}
+
+void main() {
+    vec4 C_in = imageLoad(hdrImage, ivec2(gl_FragCoord.xy));
+    float L_avg = imageLoad(lumAvg, 0).r * 100.0;
+
+    C_in.rgb = tone_mapping_y(C_in.rgb, L_avg);
+
+    FragColor = C_in;
+}

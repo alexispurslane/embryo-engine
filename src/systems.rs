@@ -12,27 +12,6 @@ use rand::Rng;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use render_gl::shaders;
 
-pub fn load_shaders(gl: &Gl, render: &mut RenderState) {
-    let vert_shader =
-        shaders::Shader::from_file(gl, "./data/shaders/camera.vert", gl::VERTEX_SHADER)
-            .map_err(|e| {
-                println!("Could not compile vertex shader. Errors:\n{}", e);
-                std::process::exit(1);
-            })
-            .unwrap();
-
-    let frag_shader =
-        shaders::Shader::from_file(gl, "./data/shaders/material.frag", gl::FRAGMENT_SHADER)
-            .map_err(|e| {
-                println!("Could not compile fragment shader. Errors:\n{}", e);
-                std::process::exit(1);
-            })
-            .unwrap();
-    render
-        .shader_programs
-        .push(Program::from_shaders(gl, &[frag_shader, vert_shader]).unwrap());
-}
-
 pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
     let e = scene.entities_mut().gen_entity();
     scene.entities_mut().add_component(
@@ -43,35 +22,21 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         .entities_mut()
         .add_component(e, CameraComponent { fov: 90.0 });
     scene.register_camera(e);
-    scene.entities_mut().add_component(
+    /*scene.entities_mut().add_component(
         e,
         LightComponent::Spot {
             color: glam::vec3(0.3, 0.3, 1.0),
             ambient: glam::vec3(0.0, 0.2, 0.3),
-            cutoff: 0.5,
-            exponent: 3.0,
+            cutoff: 0.94,
+            fade_exponent: 2.0,
             attenuation: Attenuation {
                 constant: 0.2,
-                linear: 0.2,
-                quadratic: 0.2,
+                linear: 0.0,
+                quadratic: 0.0,
             },
         },
     );
-    scene.register_light(e);
-
-    let e = scene.entities_mut().gen_entity();
-    scene.entities_mut().add_component(
-        e,
-        TransformComponent::new_from_rot_trans(glam::Vec3::Y, glam::vec3(0.0, 0.0, 0.0), true),
-    );
-    scene.entities_mut().add_component(
-        e,
-        LightComponent::Directional {
-            color: glam::vec3(0.7, 0.1, 0.1),
-            ambient: glam::vec3(0.1, 0.1, 0.1),
-        },
-    );
-    scene.register_light(e);
+    scene.register_light(e);*/
 
     let mut trng = rand::thread_rng();
     for i in 0..30 {
@@ -91,7 +56,7 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         scene.entities_mut().add_component(
             e,
             LightComponent::Point {
-                color: glam::vec3(0.1, 0.9, 0.1),
+                color: glam::vec3(0.1, 3.2, 0.1),
                 ambient: glam::vec3(0.0, 0.0, 0.0),
                 attenuation: Attenuation {
                     constant: 1.0,
@@ -182,4 +147,4 @@ pub fn integrate_loaded_models(
     resource_manager.try_integrate_loaded_models(&mut render.models, gl);
 }
 
-pub fn physics(game_state: &mut GameState, dt: u128) {}
+pub fn physics(game_state: &mut GameState, dt: f32, time: u128) {}

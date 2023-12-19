@@ -5,6 +5,8 @@ cap_render_fps = false
 cap_update_fps = true
 max_batch_size = 1000
 max_lights = 32
+max_quadtree_depth = 6
+max_quadtree_entities = 30
 
 [controls]
 mouse_sensitivity = 1.0

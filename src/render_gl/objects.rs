@@ -1,10 +1,10 @@
 #![allow(unused)]
 
-use std::marker::PhantomData;
+use std::{any::Any, marker::PhantomData};
 
 use gl::Gl;
 
-use super::data;
+use super::{data, textures::ColorDepth};
 
 pub trait Buffer {
     /// Number of vertices or indices in the buffer
@@ -403,5 +403,159 @@ impl Drop for VertexArrayObject {
         unsafe {
             self.gl.DeleteVertexArrays(1, &mut self.id);
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum FramebufferAttachmentType {
+    Texture,
+    Renderbuffer,
+}
+
+pub trait FramebufferAttachment {
+    fn internal_format(&self) -> gl::types::GLenum;
+    fn attachment_point(&self) -> gl::types::GLenum;
+    fn id(&self) -> gl::types::GLuint;
+    fn attachment_type(&self) -> FramebufferAttachmentType;
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+pub struct FramebufferObject {
+    gl: Gl,
+    pub id: gl::types::GLuint,
+
+    pub bind_point: Option<gl::types::GLenum>,
+    pub attachments: Vec<Box<dyn FramebufferAttachment>>,
+}
+
+impl FramebufferObject {
+    pub fn new(gl: &Gl) -> Self {
+        let mut fbo: gl::types::GLuint = 0;
+        unsafe {
+            gl.CreateFramebuffers(1, &mut fbo);
+        }
+
+        FramebufferObject {
+            gl: gl.clone(),
+            id: fbo,
+            bind_point: None,
+            attachments: vec![],
+        }
+    }
+
+    pub fn bind_to(&mut self, bind_point: gl::types::GLenum) {
+        self.bind_point = Some(bind_point);
+        unsafe {
+            self.gl.BindFramebuffer(bind_point, self.id);
+        }
+    }
+
+    pub fn unbind(&mut self) {
+        if let Some(bp) = self.bind_point {
+            unsafe {
+                self.gl.BindFramebuffer(bp, 0);
+            }
+            self.bind_point = None;
+        } else {
+            println!("WARNING: trying to unbind framebuffer that was not bound!");
+        }
+    }
+
+    pub fn attach<A: FramebufferAttachment + 'static>(&mut self, attachment: A) {
+        unsafe {
+            match attachment.attachment_type() {
+                FramebufferAttachmentType::Renderbuffer => {
+                    self.gl.NamedFramebufferRenderbuffer(
+                        self.id,
+                        attachment.attachment_point(),
+                        gl::RENDERBUFFER,
+                        attachment.id(),
+                    );
+                }
+                FramebufferAttachmentType::Texture => self.gl.NamedFramebufferTexture(
+                    self.id,
+                    attachment.attachment_point(),
+                    attachment.id(),
+                    0,
+                ),
+            }
+        }
+        println!(
+            "Attaching {:?} object {}",
+            attachment.attachment_type(),
+            attachment.id()
+        );
+        self.attachments.push(Box::new(attachment));
+    }
+
+    pub fn get_attachment<A: FramebufferAttachment + 'static>(&mut self, index: usize) -> &mut A {
+        (self.attachments.get_mut(index).unwrap().as_any_mut())
+            .downcast_mut::<A>()
+            .unwrap()
+    }
+}
+
+impl Drop for FramebufferObject {
+    fn drop(&mut self) {
+        unsafe {
+            self.gl.DeleteFramebuffers(1, &mut self.id);
+        }
+    }
+}
+
+pub struct Renderbuffer<T: ColorDepth> {
+    gl: Gl,
+    marker: std::marker::PhantomData<T>,
+
+    pub id: gl::types::GLuint,
+    pub renderbuffer_type: gl::types::GLenum,
+}
+
+impl<T: ColorDepth> Renderbuffer<T> {
+    pub fn new_with_size_and_attachment(
+        gl: &Gl,
+        width: usize,
+        height: usize,
+        renderbuffer_type: gl::types::GLenum,
+    ) -> Self {
+        let mut rb: gl::types::GLuint = 0;
+        unsafe {
+            gl.CreateRenderbuffers(1, &mut rb);
+            gl.NamedRenderbufferStorage(
+                rb,
+                T::get_sized_internal_format(),
+                width as gl::types::GLsizei,
+                height as gl::types::GLsizei,
+            );
+        }
+
+        Self {
+            gl: gl.clone(),
+            id: rb,
+            marker: std::marker::PhantomData,
+            renderbuffer_type,
+        }
+    }
+}
+
+impl<T: ColorDepth + 'static> FramebufferAttachment for Renderbuffer<T> {
+    fn internal_format(&self) -> gl::types::GLenum {
+        T::get_sized_internal_format()
+    }
+    fn attachment_point(&self) -> gl::types::GLenum {
+        self.renderbuffer_type
+    }
+    fn id(&self) -> gl::types::GLuint {
+        self.id
+    }
+    fn attachment_type(&self) -> FramebufferAttachmentType {
+        FramebufferAttachmentType::Renderbuffer
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

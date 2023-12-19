@@ -20,7 +20,7 @@ use crate::render_gl::textures::{AbstractTexture, Texture, RGB8};
 use crate::render_gl::{
     objects::{self, Buffer},
     shaders::Program,
-    textures::{self, IntoTextureUnit, TextureParameters},
+    textures::{self, TextureParameters},
 };
 use crate::utils::zip;
 
@@ -65,8 +65,7 @@ impl Material {
         shader_program.set_uniform_1f(&CString::new("shininess").unwrap(), self.shininess);
         if let Some(nm) = self.normal_map {
             let texture = &model.textures.as_ref().expect("Cannot activate a material in the shader if that material and associated model have not had their OpenGL things set up.")[nm];
-            texture.activate(2.to_texture_unit());
-            texture.bind();
+            texture.bind(2);
             shader_program.set_uniform_1ui(&CString::new("material.normalMap").unwrap(), 2);
         }
     }
@@ -82,8 +81,7 @@ impl Material {
         match val {
             Texture(tex) => {
                 let texture = &model.textures.as_ref().expect("Cannot activate a material in the shader if that material and associated model have not had their OpenGL things set up.")[*tex];
-                texture.activate(texture_bind.to_texture_unit());
-                texture.bind();
+                texture.bind(texture_bind);
                 shader_program.set_uniform_1ui(
                     &CString::new(format!("{}Texture", uniform_name)).unwrap(),
                     texture_bind as u32,
@@ -326,6 +324,8 @@ impl Model {
             specular,
             if specular == 0.0 {
                 1.0 / (1.0 - 0.25 * (Self::magic_diffuse_curve(roughness * 255.0) / 64.0))
+            } else if metalness > 0.8 {
+                1.0 - metalness
             } else {
                 1.0
             },
@@ -496,8 +496,8 @@ impl Model {
                 pbr.roughness_factor()
             );
             println!(
-                "Specular factor: {}, diffuse factor: {:?}",
-                specular_factor, diffuse_adj_factor
+                "Specular factor: {}, diffuse factor: {:?}, shininess: {}",
+                specular_factor, diffuse_adj_factor, shininess
             );
 
             if let Some(mut image) = diffuse_map {
@@ -525,12 +525,20 @@ impl Model {
                 images[pbr.base_color_texture().unwrap().texture().source().index()] = image;
             }
 
+            let diffuse_color = pbr.base_color_factor();
+            let diffuse_color = [
+                diffuse_color[0] * diffuse_adj_factor,
+                diffuse_color[1] * diffuse_adj_factor,
+                diffuse_color[2] * diffuse_adj_factor,
+                diffuse_color[3],
+            ];
             Material {
                 name: m.name().unwrap_or("UnknownMaterial").to_string(),
-                diffuse: pbr.base_color_texture().map_or(
-                    FactorOrTexture::Vec4(pbr.base_color_factor().into()),
-                    |info| FactorOrTexture::Texture(info.texture().source().index()),
-                ),
+                diffuse: pbr
+                    .base_color_texture()
+                    .map_or(FactorOrTexture::Vec4(diffuse_color.into()), |info| {
+                        FactorOrTexture::Texture(info.texture().source().index())
+                    }),
                 specular: FactorOrTexture::Vec3(
                     [specular_factor, specular_factor, specular_factor].into(),
                 ),
@@ -587,8 +595,9 @@ impl Model {
                         gl,
                         TextureParameters::default(),
                         bytes,
-                        *width,
-                        *height,
+                        *width as usize,
+                        *height as usize,
+                        1,
                     )) as Box<dyn AbstractTexture>
                 })
                 .collect::<Vec<Box<dyn AbstractTexture>>>(),

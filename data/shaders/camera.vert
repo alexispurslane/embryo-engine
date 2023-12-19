@@ -16,11 +16,10 @@ out VS_OUT {
     vec4 tangent;
 } vs_out;
 
-void main()
-    {
-        gl_Position = projection_matrix * view_matrix * model_matrix * vec4(aPos, 1.0);
-        vs_out.position = model_matrix * vec4(aPos, 1.0);
-        vs_out.texCoord = aTexCoord;
-        vs_out.normal = aNormal;
-        vs_out.tangent = aTangent;
-    }
+void main() {
+    gl_Position = projection_matrix * view_matrix * model_matrix * vec4(aPos, 1.0);
+    vs_out.position = model_matrix * vec4(aPos, 1.0);
+    vs_out.texCoord = aTexCoord;
+    vs_out.normal = aNormal;
+    vs_out.tangent = aTangent;
+}

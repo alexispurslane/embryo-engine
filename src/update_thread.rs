@@ -128,7 +128,7 @@ impl GameState {
         self.command_queue.extend(cs);
     }
 
-    pub fn move_camera_by_vector(&mut self, d: Direction, dt: u128) {
+    pub fn move_camera_by_vector(&mut self, d: Direction, dt: f32) {
         let camera_entity = self.camera.expect("No camera found");
         let mut camera_transform = self
             .entities_mut()
@@ -138,7 +138,7 @@ impl GameState {
         camera_transform.displace_by(d * CONFIG.controls.motion_speed * (dt as f32 / 1000.0));
     }
 
-    pub fn rotate_camera(&mut self, pyr: PitchYawRoll, dt: u128) {
+    pub fn rotate_camera(&mut self, pyr: PitchYawRoll, dt: f32) {
         let camera_entity = self.camera.expect("No camera found");
         let mut camera_transform = self
             .entities_mut()
@@ -156,7 +156,7 @@ impl GameState {
     }
 
     /// Apply queued world state changes to the world state
-    pub fn update(&mut self, dt: u128) {
+    pub fn update(&mut self, dt: f32) {
         // Update world state
         while let Some(command) = self.command_queue.pop() {
             match command {
@@ -186,17 +186,18 @@ pub fn spawn_update_loop(
     let (width, height) = window.size();
     let core_ids = core_affinity::get_core_ids().unwrap();
     let running = running.clone();
-    let interval = CONFIG.performance.update_interval as u128;
+    let interval = CONFIG.performance.update_interval as f32;
     std::thread::spawn(move || {
         let res = core_affinity::set_for_current(core_ids[0]);
         if res {
             let time = std::time::Instant::now();
+            let start_time = time.elapsed().as_millis();
             let mut last_time = time.elapsed().as_millis();
-            let mut dt: u128;
-            let mut lag = 0;
+            let mut dt: f32;
+            let mut lag = 0.0;
             while game_state.running {
                 let current_time = time.elapsed().as_millis();
-                dt = current_time - last_time;
+                dt = (current_time - last_time) as f32;
                 lag += dt;
                 last_time = current_time;
 
@@ -204,7 +205,7 @@ pub fn spawn_update_loop(
                 // Catch up with things that require a maximum step size to be stable
                 while lag > interval {
                     let delta_time = lag.min(interval);
-                    systems::physics(&mut game_state, delta_time);
+                    systems::physics(&mut game_state, delta_time, current_time - start_time);
                     lag -= interval;
                 }
 
@@ -296,8 +297,8 @@ pub fn spawn_update_loop(
                         });
                     }
                     if CONFIG.performance.cap_update_fps {
-                        let sleep_time = interval.checked_sub(dt).unwrap_or(0);
-                        if sleep_time > 0 {
+                        let sleep_time = interval - dt;
+                        if sleep_time > 0.0 {
                             std::thread::sleep(Duration::from_millis(sleep_time as u64));
                         }
                     }

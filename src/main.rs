@@ -56,7 +56,7 @@ pub fn main() {
     gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
     gl_attr.set_context_version(4, 6);
 
-    let mut window = video_subsystem
+    let window = video_subsystem
         .window("Project Gilgamesh v0.1.0", 1920, 1080)
         .position_centered()
         .opengl()
@@ -72,13 +72,14 @@ pub fn main() {
     let gl = gl::Gl::load_with(|s| {
         video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void
     });
+    unsafe {
+        gl.ClampColor(gl::CLAMP_READ_COLOR, gl::FIXED_ONLY);
+    }
     if CONFIG.performance.cap_render_fps {
         let _ = video_subsystem.gl_set_swap_interval(1);
     } else {
         let _ = video_subsystem.gl_set_swap_interval(0);
     }
-
-    utils::setup_viewport(&gl, window.size());
 
     ///////// Initialize imGUI
 
@@ -94,7 +95,21 @@ pub fn main() {
 
     ///////// Initalize game
 
-    let (game_state, render_state, resource_manager) = create_state(&gl);
+    let (width, height) = window.size();
+
+    let mut game_state = GameState::new();
+    let mut render_state = RenderState::new(&gl, width as usize, height as usize);
+    let resource_manager = ResourceManager::new();
+
+    render_state.load_shaders();
+    let new_entities = systems::load_entities(&mut game_state);
+    systems::unload_entity_models(
+        &mut game_state,
+        &mut render_state,
+        &resource_manager,
+        &new_entities,
+    );
+    systems::load_entity_models(&mut game_state, &resource_manager, &new_entities);
 
     ///////// Game loop
 
@@ -108,6 +123,7 @@ pub fn main() {
     ) = channel();
     let (event_sender, event_receiver): (Sender<GameStateEvent>, Receiver<GameStateEvent>) =
         channel();
+
     update_thread::spawn_update_loop(
         game_state,
         &resource_manager,
@@ -118,8 +134,7 @@ pub fn main() {
     );
 
     ////// Render thread
-    render_thread::renderer(
-        render_state,
+    render_state.render_loop(
         &resource_manager,
         render_state_receiver,
         event_sender,
@@ -130,22 +145,5 @@ pub fn main() {
         &renderer,
         &window,
         running,
-    );
-}
-
-fn create_state(gl: &Gl) -> (GameState, RenderState, ResourceManager) {
-    let mut game_state = GameState::new();
-    let mut render_state = RenderState::new(gl);
-    let resource_manager = ResourceManager::new();
-
-    systems::load_shaders(&gl, &mut render_state);
-    let new_entities = systems::load_entities(&mut game_state);
-    systems::unload_entity_models(
-        &mut game_state,
-        &mut render_state,
-        &resource_manager,
-        &new_entities,
-    );
-    systems::load_entity_models(&mut game_state, &resource_manager, &new_entities);
-    (game_state, render_state, resource_manager)
+    )
 }
