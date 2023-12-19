@@ -434,7 +434,7 @@ impl RenderState {
             self.gl.DispatchCompute(1, 1, 1);
 
             self.shader_programs[&TONEMAP_SHADER].set_used();
-            self.shader_programs[&TONEMAP_SHADER].set_uniform_4f(
+            self.shader_programs[&LUMINANCE_SHADER2].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [4.9, 0.0, 0.0, 0.0].into(),
             );
