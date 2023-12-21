@@ -3,6 +3,7 @@
 #define RGB_TO_LUM vec3(0.2125, 0.7154, 0.0721)
 
 layout (location = 0) out vec4 FragColor;
+layout (location = 1) out vec4 BrightColor;
 
 in VS_OUT {
     vec4 position;
@@ -145,4 +146,5 @@ void main()
 
     vec3 rgb = color.rgb * scatteredLight + reflectedLight * strength;
     FragColor = vec4(rgb, color.a);
+    BrightColor = vec4(rgb * 4.0 * smoothstep(bloomThreshold.x, bloomThreshold.y, dot(rgb, RGB_TO_LUM)), 1.0);
 }

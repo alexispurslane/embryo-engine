@@ -1,7 +1,12 @@
 [package]
 name = "project-gilgamesh"
 version = "0.1.0"
+license = "MPL-2.0"
+license-file = "LICENSE"
 edition = "2021"
+keywords = ["gamedev", "graphics", "engine", "game", "data-driven", "scripting"]
+categories = ["game-engines", "game-development", "graphics"]
+publish = false
 
 [dependencies]
 gl = { path = "lib/gl" }

@@ -4,7 +4,7 @@ use gl::Gl;
 use crate::utils::*;
 use std::ffi::{CStr, CString};
 
-use super::data::{Cvec3, Cvec4};
+use super::data::{Cvec2, Cvec3, Cvec4};
 
 #[derive(Clone)]
 pub struct Shader {
@@ -77,6 +77,22 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn new_with_shader_files(
+        gl: &Gl,
+        shaders: &[(gl::types::GLenum, &'static str)],
+    ) -> Program {
+        let shaders = shaders
+            .iter()
+            .map(|(t, file)| {
+                Shader::from_file(gl, file, *t).unwrap_or_else(|e| {
+                    panic!("Could not compile {:?} shader. Errors:\n{}", file, e)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Self::from_shaders(&gl, &shaders).expect("Could not compile shader program")
+    }
+
     pub fn from_shaders(gl: &Gl, shaders: &[Shader]) -> Result<Program, String> {
         let program_id = unsafe { gl.CreateProgram() };
 
@@ -169,6 +185,17 @@ impl Program {
             let loc = self.gl.GetUniformLocation(self.id, name.as_ptr());
             if loc != -1 {
                 self.gl.Uniform1f(loc, x as gl::types::GLfloat);
+            } else {
+                panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
+            }
+        }
+    }
+
+    pub fn set_uniform_2f(&self, name: &CStr, vec: Cvec2) {
+        unsafe {
+            let loc = self.gl.GetUniformLocation(self.id, name.as_ptr());
+            if loc != -1 {
+                self.gl.Uniform2f(loc, vec.d0, vec.d1);
             } else {
                 panic!("Cannot get uniform {:?} in program {:?}", name, self.id);
             }

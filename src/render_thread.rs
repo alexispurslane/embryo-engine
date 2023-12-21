@@ -32,7 +32,7 @@ use std::{
 };
 
 use bytes::{BufMut, Bytes, BytesMut};
-use gl::Gl;
+use gl::{Gl, COLOR_ATTACHMENT0};
 use glam::Vec4Swizzles;
 
 pub struct RenderStateEvent {
@@ -213,6 +213,7 @@ impl RenderState {
         pipeline: &mut RenderPipeline,
     ) {
         let len = pipeline.len();
+        let mut attachments: Vec<u32> = vec![];
         for (stage, function) in pipeline.iter_mut().enumerate() {
             let (mut in_fbo, mut out_fbo) = if stage % 2 == 0 {
                 (ping.borrow_mut(), pong.borrow_mut())
@@ -228,108 +229,126 @@ impl RenderState {
                     gl.BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
                 }
             } else {
+                for attachment in attachments {
+                    unsafe {
+                        let attachment1 =
+                            in_fbo.get_attachment::<Texture<RGBA16F>>(attachment as usize);
+                        let attachment2 =
+                            out_fbo.get_attachment_mut::<Texture<RGBA16F>>(attachment as usize);
+                        self.gl.CopyImageSubData(
+                            attachment1.id,
+                            gl::TEXTURE_2D,
+                            0,
+                            0,
+                            0,
+                            0,
+                            attachment2.id,
+                            gl::TEXTURE_2D,
+                            0,
+                            0,
+                            0,
+                            0,
+                            self.viewport_size.0 as gl::types::GLsizei,
+                            self.viewport_size.1 as gl::types::GLsizei,
+                            1,
+                        );
+                    }
+                }
+                unsafe {
+                    self.gl
+                        .NamedFramebufferReadBuffer(in_fbo.id, gl::DEPTH_ATTACHMENT);
+                    self.gl
+                        .NamedFramebufferDrawBuffer(out_fbo.id, gl::DEPTH_ATTACHMENT);
+                    self.gl.BlitNamedFramebuffer(
+                        in_fbo.id,
+                        out_fbo.id,
+                        0,
+                        0,
+                        self.viewport_size.0 as gl::types::GLsizei,
+                        self.viewport_size.1 as gl::types::GLsizei,
+                        0,
+                        0,
+                        self.viewport_size.0 as gl::types::GLsizei,
+                        self.viewport_size.1 as gl::types::GLsizei,
+                        gl::DEPTH_BUFFER_BIT,
+                        gl::NEAREST,
+                    );
+                }
+
                 out_fbo.bind_to(gl::DRAW_FRAMEBUFFER);
             }
 
-            function(self, in_fbo, out_fbo);
+            attachments = function(self, in_fbo, out_fbo);
         }
     }
 
     pub fn load_shaders(&mut self) {
-        {
-            let vert_shader = shaders::Shader::from_file(
+        // Standard modified Blinn-Phong BRDF light/material shader
+        self.shader_programs.insert(
+            DEFAULT_SHADER,
+            Program::new_with_shader_files(
                 &self.gl,
-                "./data/shaders/camera.vert",
-                gl::VERTEX_SHADER,
-            )
-            .map_err(|e| {
-                println!("Could not compile vertex shader. Errors:\n{}", e);
-                std::process::exit(1);
-            })
-            .unwrap();
+                &[
+                    (gl::VERTEX_SHADER, "./data/shaders/camera.vert"),
+                    (gl::FRAGMENT_SHADER, "./data/shaders/material.frag"),
+                ],
+            ),
+        );
 
-            let frag_shader = shaders::Shader::from_file(
+        // Tonemapping, gamma correction, and auto exposure shader, the final
+        // step in the postprocessing pipeline
+        self.shader_programs.insert(
+            TONEMAP_SHADER,
+            Program::new_with_shader_files(
                 &self.gl,
-                "./data/shaders/material.frag",
-                gl::FRAGMENT_SHADER,
-            )
-            .map_err(|e| {
-                println!("Could not compile fragment shader. Errors:\n{}", e);
-                std::process::exit(1);
-            })
-            .unwrap();
-            self.shader_programs.insert(
-                DEFAULT_SHADER,
-                Program::from_shaders(&self.gl, &[frag_shader, vert_shader]).unwrap(),
-            );
-        }
+                &[
+                    (gl::VERTEX_SHADER, "./data/shaders/passthrough.vert"),
+                    (gl::FRAGMENT_SHADER, "./data/shaders/hdr.frag"),
+                ],
+            ),
+        );
 
-        let passthrough = shaders::Shader::from_file(
-            &self.gl,
-            "./data/shaders/passthrough.vert",
-            gl::VERTEX_SHADER,
-        )
-        .map_err(|e| {
-            println!("Could not compile vertex shader. Errors:\n{}", e);
-            std::process::exit(1);
-        })
-        .unwrap();
-        {
-            let frag_shader = shaders::Shader::from_file(
+        // Compute shaders to support the above by calculating luminence
+        // histograms and averaging them
+        self.shader_programs.insert(
+            LUMINANCE_SHADER,
+            Program::new_with_shader_files(
                 &self.gl,
-                "./data/shaders/hdr.frag",
-                gl::FRAGMENT_SHADER,
-            )
-            .map_err(|e| {
-                println!("Could not compile fragment shader. Errors:\n{}", e);
-                std::process::exit(1);
-            })
-            .unwrap();
-            self.shader_programs.insert(
-                TONEMAP_SHADER,
-                Program::from_shaders(&self.gl, &[passthrough.clone(), frag_shader]).unwrap(),
-            );
-        }
+                &[(gl::COMPUTE_SHADER, "./data/shaders/luminance.comp")],
+            ),
+        );
 
-        {
-            let luminance = shaders::Shader::from_file(
+        self.shader_programs.insert(
+            LUMINANCE_SHADER2,
+            Program::new_with_shader_files(
                 &self.gl,
-                "./data/shaders/luminance.comp",
-                gl::COMPUTE_SHADER,
-            )
-            .map_err(|e| {
-                println!(
-                    "Could not compile post-processing compute shader. Errors:\n{}",
-                    e
-                );
-                std::process::exit(1);
-            })
-            .unwrap();
+                &[(gl::COMPUTE_SHADER, "./data/shaders/average.comp")],
+            ),
+        );
 
-            let average_luminance = shaders::Shader::from_file(
+        // Gaussian filter, supporting bloom shader below
+        self.shader_programs.insert(
+            GAUSSIAN_SHADER,
+            Program::new_with_shader_files(
                 &self.gl,
-                "./data/shaders/average.comp",
-                gl::COMPUTE_SHADER,
-            )
-            .map_err(|e| {
-                println!(
-                    "Could not compile post-processing compute shader. Errors:\n{}",
-                    e
-                );
-                std::process::exit(1);
-            })
-            .unwrap();
+                &[
+                    (gl::VERTEX_SHADER, "./data/shaders/passthrough.vert"),
+                    (gl::FRAGMENT_SHADER, "./data/shaders/gaussian.frag"),
+                ],
+            ),
+        );
 
-            self.shader_programs.insert(
-                LUMINANCE_SHADER,
-                Program::from_shaders(&self.gl, &[luminance]).unwrap(),
-            );
-
-            self.shader_programs.insert(
-                LUMINANCE_SHADER2,
-                Program::from_shaders(&self.gl, &[average_luminance]).unwrap(),
-            );
-        }
+        // Bloom shader
+        self.shader_programs.insert(
+            BLOOM_SHADER,
+            Program::new_with_shader_files(
+                &self.gl,
+                &[
+                    (gl::VERTEX_SHADER, "./data/shaders/passthrough.vert"),
+                    (gl::FRAGMENT_SHADER, "./data/shaders/bloom.frag"),
+                ],
+            ),
+        );
     }
 
     pub fn merge_changes(&mut self, new_render_state: RenderStateEvent) {
@@ -397,6 +416,9 @@ impl RenderState {
         )));
         let mut pipeline = vec![
             Box::new(Self::render) as Box<PipelineFunction>,
+            Box::new(Self::render_gaussian_1) as Box<PipelineFunction>,
+            Box::new(Self::render_gaussian_2) as Box<PipelineFunction>,
+            Box::new(Self::render_bloom) as Box<PipelineFunction>,
             Box::new(Self::render_hdr) as Box<PipelineFunction>,
         ];
 
@@ -466,6 +488,83 @@ impl RenderState {
         }
     }
 
+    /// Do ONE STEP of the gaussian blur on the brightness pass texture
+    pub fn render_gaussian_1(
+        &mut self,
+        source_fbo: RefMut<FramebufferObject>,
+        dest_fbo: RefMut<FramebufferObject>,
+    ) -> Vec<u32> {
+        let bright_pass =
+            source_fbo.get_attachment::<Texture<RGBA16F>>(BRIGHT_PASS_ATTACHMENT as usize);
+        dest_fbo.draw_to_buffers(&[GAUSSIAN_ATTACHMENT]);
+        unsafe {
+            self.shader_programs[&GAUSSIAN_SHADER].set_used();
+            self.gl.BindImageTexture(
+                0,
+                bright_pass.id,
+                0,
+                gl::FALSE,
+                0,
+                gl::READ_ONLY,
+                gl::RGBA16F,
+            );
+            self.quad_vao.bind();
+            self.quad_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+            self.quad_vao.unbind();
+        }
+        vec![GAUSSIAN_ATTACHMENT]
+    }
+
+    /// Do ONE STEP of the gaussian blur on the brightness pass texture
+    pub fn render_gaussian_2(
+        &mut self,
+        source_fbo: RefMut<FramebufferObject>,
+        dest_fbo: RefMut<FramebufferObject>,
+    ) -> Vec<u32> {
+        let bright_pass =
+            source_fbo.get_attachment::<Texture<RGBA16F>>(GAUSSIAN_ATTACHMENT as usize);
+        dest_fbo.draw_to_buffers(&[GAUSSIAN_ATTACHMENT]);
+        unsafe {
+            self.shader_programs[&GAUSSIAN_SHADER].set_used();
+            self.gl.BindImageTexture(
+                0,
+                bright_pass.id,
+                0,
+                gl::FALSE,
+                0,
+                gl::READ_ONLY,
+                gl::RGBA16F,
+            );
+            self.quad_vao.bind();
+            self.quad_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+            self.quad_vao.unbind();
+        }
+        vec![GAUSSIAN_ATTACHMENT]
+    }
+
+    pub fn render_bloom(
+        &mut self,
+        source_fbo: RefMut<FramebufferObject>,
+        dest_fbo: RefMut<FramebufferObject>,
+    ) -> Vec<u32> {
+        let hdr_image = source_fbo.get_attachment::<Texture<RGBA16F>>(HDR_ATTACHMENT as usize);
+        let gaussian_image =
+            source_fbo.get_attachment::<Texture<RGBA16F>>(GAUSSIAN_ATTACHMENT as usize);
+        dest_fbo.draw_to_buffers(&[HDR_ATTACHMENT]);
+        unsafe {
+            self.shader_programs[&BLOOM_SHADER].set_used();
+            self.gl
+                .BindImageTexture(0, hdr_image.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
+            gaussian_image.bind(0);
+            self.shader_programs[&BLOOM_SHADER]
+                .set_uniform_1ui(&CString::new("blurImage").unwrap(), 0);
+            self.quad_vao.bind();
+            self.quad_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+            self.quad_vao.unbind();
+        }
+        vec![HDR_ATTACHMENT]
+    }
+
     pub fn render_hdr(
         &mut self,
         source_fbo: RefMut<FramebufferObject>,
@@ -474,19 +573,18 @@ impl RenderState {
         utils::setup_viewport(&self.gl, self.viewport_size);
         utils::clear_screen(&self.gl);
 
-        let hdrImage = source_fbo.get_attachment::<Texture<RGBA16F>>(HDR_ATTACHMENT as usize);
-        let minLogLum = -8.0f32;
-        let maxLogLum = 3.5f32;
-        let tau = 1.1f32;
-        let timeCoeff = (1.0 - (-(1000.0 / self.avg_dt) * tau).exp()).clamp(0.0, 1.0);
+        let hdr_image = source_fbo.get_attachment::<Texture<RGBA16F>>(HDR_ATTACHMENT as usize);
+        let time_coefficient = (1.0
+            - (-(1000.0 / self.avg_dt) * CONFIG.graphics.auto_exposure_speed_factor).exp())
+        .clamp(0.0, 1.0);
         unsafe {
             self.shader_programs[&LUMINANCE_SHADER].set_used();
 
             self.shader_programs[&LUMINANCE_SHADER].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [
-                    minLogLum,
-                    1.0 / (maxLogLum - minLogLum),
+                    CONFIG.graphics.min_log_luminence,
+                    1.0 / (CONFIG.graphics.max_log_luminence - CONFIG.graphics.min_log_luminence),
                     self.viewport_size.0 as f32,
                     self.viewport_size.1 as f32,
                 ]
@@ -494,7 +592,7 @@ impl RenderState {
             );
 
             self.gl
-                .BindImageTexture(0, hdrImage.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
+                .BindImageTexture(0, hdr_image.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
 
             self.gl
                 .BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, self.luminance_histogram.id);
@@ -510,36 +608,13 @@ impl RenderState {
             self.shader_programs[&LUMINANCE_SHADER2].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [
-                    minLogLum,
-                    maxLogLum - minLogLum,
-                    timeCoeff,
+                    CONFIG.graphics.min_log_luminence,
+                    CONFIG.graphics.max_log_luminence - CONFIG.graphics.min_log_luminence,
+                    time_coefficient,
                     (self.viewport_size.0 * self.viewport_size.1) as f32,
                 ]
                 .into(),
             );
-
-            if self.lag >= 16.0 {
-                let mut pixels = BytesMut::with_capacity(4);
-                pixels.set_len(4);
-                self.gl.GetTextureSubImage(
-                    self.luminance_avg.id,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    gl::RED,
-                    gl::FLOAT,
-                    4,
-                    pixels.as_mut_ptr() as *mut std::ffi::c_void,
-                );
-                println!(
-                    "{:?}",
-                    f32::from_le_bytes(pixels.split_at(4).0.try_into().unwrap())
-                );
-            }
 
             self.gl.BindImageTexture(
                 0,
@@ -571,7 +646,7 @@ impl RenderState {
                 gl::R16F,
             );
             self.gl
-                .BindImageTexture(1, hdrImage.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
+                .BindImageTexture(1, hdr_image.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
 
             self.quad_vao.bind();
             self.quad_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
@@ -598,6 +673,15 @@ impl RenderState {
             let mut last_shader_program_index = 0;
             let mut program = &self.shader_programs[&DEFAULT_SHADER];
             program.set_used();
+
+            program.set_uniform_2f(
+                &CString::new("bloomThreshold").unwrap(),
+                [
+                    CONFIG.graphics.min_bloom_threshold,
+                    CONFIG.graphics.max_bloom_threshold,
+                ]
+                .into(),
+            );
 
             // Prepare the shader's constant uniforms based on the camera and the lights.
             utils::camera_prepare_shader(program, camera);
@@ -719,7 +803,7 @@ impl RenderState {
                 }
             }
         }
-        vec![0, 1]
+        vec![HDR_ATTACHMENT, BRIGHT_PASS_ATTACHMENT]
     }
 }
 

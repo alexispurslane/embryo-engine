@@ -12,5 +12,5 @@ void main() {
     vec4 color = vec4(0.0);
 
     FragColor = imageLoad(hdrImage, ivec2(gl_FragCoord.xy)) * sceneFactor
-        + imageLoad(blurImage, ivec2(gl_FragCoord.xy)) * bloomFactor;
+        + texture(blurImage, ivec2(gl_FragCoord.xy)) * bloomFactor;
 }

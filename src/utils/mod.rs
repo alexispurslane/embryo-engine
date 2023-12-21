@@ -12,7 +12,7 @@ use crate::{
     },
     render_gl::{
         objects::{Buffer, BufferObject},
-        shaders::Program,
+        shaders::{self, Program},
     },
     render_thread::{light_component_to_shader_light, RenderCameraState, RenderState, ShaderLight},
     CONFIG,
@@ -123,9 +123,23 @@ pub mod config {
     }
 
     #[derive(Deserialize)]
+    pub struct GraphicsConfig {
+        pub min_log_luminence: f32,
+        pub max_log_luminence: f32,
+        pub auto_exposure_speed_factor: f32,
+        pub bloom: bool,
+        pub min_bloom_threshold: f32,
+        pub max_bloom_threshold: f32,
+        pub bloom_factor: f32,
+        pub scene_factor: f32,
+        pub fxaa: bool,
+    }
+
+    #[derive(Deserialize)]
     pub struct GameConfig {
         pub performance: PerfConfig,
         pub controls: ControlConfig,
+        pub graphics: GraphicsConfig,
     }
 
     pub fn read_config() -> GameConfig {
@@ -148,6 +162,17 @@ max_batch_size = 1000
 max_lights = 32
 max_quadtree_depth = 6
 max_quadtree_entities = 30
+
+[graphics]
+min_log_luminence = -8.0
+max_log_luminence = 3.5
+auto_exposure_speed_factor = 1.1
+bloom = true
+min_bloom_threshold = 0.8
+max_bloom_threshold = 1.2
+bloom_factor = 1.0
+scene_factor = 1.0
+fxaa = true
 
 [controls]
 mouse_sensitivity = 1.0
