@@ -65,39 +65,17 @@ vec3 lottes(vec3 color) {
     return color;
 }
 
-float reinhard(float L_in) {
-    float simple = L_in / (1.0 + L_in);
-    float extended = simple * (1.0 + L_in / (params.x * params.x));
-    return extended;
-}
-
-float tone_adjust_single(float L_in, float L_avg) {
-    // Adjust the exposure of that luminance based on current scene average
-    // luminance
-    float L_prime = L_in / (9.6 * L_avg);
-    // adjusted display luminance
-    float L_d = curve(L_prime);
-    // Adjust the input pixel to the display luminance based on its original
-    // (exposure adjusted) luminance
-    return L_d / L_prime;
-}
-
-vec3 tone_mapping_y(vec3 C_in, float L_avg) {
-    // Luminance of this pixel
-    vec3 L_in = C_in * RGB_TO_LUM;
-
-    return vec3(
-        C_in.x * tone_adjust_single(L_in.x, L_avg),
-        C_in.y * tone_adjust_single(L_in.y, L_avg),
-        C_in.z * tone_adjust_single(L_in.z, L_avg)
-    );
-}
-
 void main() {
     vec4 C_in = imageLoad(hdrImage, ivec2(gl_FragCoord.xy));
     float L_avg = imageLoad(lumAvg, 0).r * 100.0;
+    float L_in = dot(C_in.rgb, RGB_TO_LUM);
+    float L_prime = L_in / (9.6 * L_avg);
+
+    C_in.rgb = C_in.rgb * vec3(L_prime / L_in);
 
     C_in.rgb = lottes(C_in.rgb);
+
+    C_in.rgb = pow(C_in.rgb, vec3(1.0 / 2.22));
 
     FragColor = C_in;
 }

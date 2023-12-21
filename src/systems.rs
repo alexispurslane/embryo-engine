@@ -25,10 +25,10 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
     /*scene.entities_mut().add_component(
         e,
         LightComponent::Spot {
-            color: glam::vec3(0.3, 0.3, 1.0),
+            color: glam::vec3(0.4, 0.6, 0.8),
             ambient: glam::vec3(0.0, 0.2, 0.3),
-            cutoff: 0.94,
-            fade_exponent: 2.0,
+            cutoff: 0.0,
+            fade_exponent: 25.0,
             attenuation: Attenuation {
                 constant: 0.2,
                 linear: 0.0,
@@ -39,6 +39,11 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
     scene.register_light(e);*/
 
     let mut trng = rand::thread_rng();
+    let colors = &[
+        glam::vec3(0.1, 30.2, 0.1),
+        glam::vec3(20.2, 0.1, 0.1),
+        glam::vec3(0.1, 0.1, 10.2),
+    ];
     for i in 0..30 {
         let e = scene.entities_mut().gen_entity();
         scene.entities_mut().add_component(
@@ -56,12 +61,12 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         scene.entities_mut().add_component(
             e,
             LightComponent::Point {
-                color: glam::vec3(0.1, 3.2, 0.1),
+                color: colors[trng.gen_range(0..colors.len())],
                 ambient: glam::vec3(0.0, 0.0, 0.0),
                 attenuation: Attenuation {
                     constant: 1.0,
-                    linear: 1.0,
-                    quadratic: 1.0,
+                    linear: 0.7,
+                    quadratic: 0.3,
                 },
             },
         );

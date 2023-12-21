@@ -98,7 +98,7 @@ pub fn main() {
     let (width, height) = window.size();
 
     let mut game_state = GameState::new();
-    let mut render_state = RenderState::new(&gl, width as usize, height as usize);
+    let mut render_state = RenderState::new(&gl, width, height);
     let resource_manager = ResourceManager::new();
 
     render_state.load_shaders();

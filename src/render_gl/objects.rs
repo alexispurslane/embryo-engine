@@ -489,10 +489,28 @@ impl FramebufferObject {
         self.attachments.push(Box::new(attachment));
     }
 
-    pub fn get_attachment<A: FramebufferAttachment + 'static>(&mut self, index: usize) -> &mut A {
+    pub fn get_attachment<A: FramebufferAttachment + 'static>(&self, index: usize) -> &A {
+        (self.attachments.get(index).unwrap().as_any())
+            .downcast_ref::<A>()
+            .unwrap()
+    }
+    pub fn get_attachment_mut<A: FramebufferAttachment + 'static>(
+        &mut self,
+        index: usize,
+    ) -> &mut A {
         (self.attachments.get_mut(index).unwrap().as_any_mut())
             .downcast_mut::<A>()
             .unwrap()
+    }
+
+    pub fn draw_to_buffers(&self, buffers: &[gl::types::GLenum]) {
+        unsafe {
+            self.gl.NamedFramebufferDrawBuffers(
+                self.id,
+                buffers.len() as gl::types::GLsizei,
+                buffers.as_ptr() as *const gl::types::GLenum,
+            );
+        }
     }
 }
 

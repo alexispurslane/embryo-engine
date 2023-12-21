@@ -1,6 +1,8 @@
 #version 430 core
 
-out vec4 FragColor;
+#define RGB_TO_LUM vec3(0.2125, 0.7154, 0.0721)
+
+layout (location = 0) out vec4 FragColor;
 
 in VS_OUT {
     vec4 position;
@@ -16,6 +18,7 @@ uniform bool diffuseIsTexture;
 uniform vec3 specularFactor;
 uniform bool specularIsTexture;
 uniform float shininess;
+uniform vec2 bloomThreshold = vec2(0.0, 1.2);
 
 const uint Ambient = 0;
 const uint Directional = 1;
@@ -45,101 +48,64 @@ uniform vec3 cameraDirection;
 vec3 scatteredLight = vec3(0.0); // ambient and diffuse, color is a mix of object and light
 vec3 reflectedLight = vec3(0.0); // specular, color is based on light alone
 
-void ambientLight(
-    vec3 ambient
-) {
-    scatteredLight += ambient;
-}
-
 void directionalLight(
-    vec3 ambient,
-    vec3 direction,
-    vec3 color
+    Light light,
+    out float specular,
+    out float diffuse,
+    out float attenuation
 ) {
-    vec3 halfVector = normalize(-direction + cameraDirection);
-    float diffuse = max(0.0, dot(fs_in.normal, direction));
-    float specular = max(0.0, dot(fs_in.normal, halfVector));
-
-    if (diffuse == 0.0)
-        specular = 0.0;
-    else
-        specular = pow(specular, shininess);
-
-    scatteredLight += ambient + color * diffuse; // We'll multiply in the material's diffuse color at the last step thanks to the distributive property
-    reflectedLight += color * specular; // We'll multiply in the material's specular strength in last too
+    vec3 halfVector = normalize(-light.direction + cameraDirection);
+    diffuse = max(0.0, dot(fs_in.normal, light.direction));
+    specular = max(0.0, dot(fs_in.normal, halfVector));
+    attenuation = 1.0;
 }
 
 void pointLight(
-    vec3 ambient,
-    vec3 position,
-    vec3 color,
-    float constantAttenuation,
-    float linearAttenuation,
-    float quadraticAttenuation
+    Light light,
+    out float specular,
+    out float diffuse,
+    out float attenuation
 ) {
-    vec3 lightDirection = position - fs_in.position.xyz;
+    vec3 lightDirection = light.position - fs_in.position.xyz;
     float lightDistance = length(lightDirection);
     lightDirection = lightDirection / lightDistance;
     vec3 halfVector = normalize(lightDirection + cameraDirection);
 
-    float diffuse = max(0.0, dot(fs_in.normal, lightDirection));
-    float specular = max(0.0, dot(fs_in.normal, halfVector));
+    diffuse = max(0.0, dot(fs_in.normal, lightDirection));
+    specular = max(0.0, dot(fs_in.normal, halfVector));
 
-    float attenuation = 1.0 /
-        (constantAttenuation +
-         linearAttenuation * lightDistance +
-         quadraticAttenuation * lightDistance * lightDistance);
-
-    if (diffuse == 0.0)
-        specular = 0.0;
-    else
-        specular = pow(specular, shininess);
-
-    scatteredLight += ambient + color * diffuse * attenuation;
-    reflectedLight += color * specular * attenuation;
+    attenuation = 1.0 /
+        (light.constantAttenuation +
+         light.linearAttenuation * lightDistance +
+         light.quadraticAttenuation * lightDistance * lightDistance);
 }
 
 void spotLight(
-    vec3 ambient,
-    vec3 position,
-    vec3 direction,
-    vec3 color,
-    float cutoff,
-    float spotExp,
-    float constantAttenuation,
-    float linearAttenuation,
-    float quadraticAttenuation
+    Light light,
+    out float specular,
+    out float diffuse,
+    out float attenuation
 ) {
-    vec3 lightDirection = position - fs_in.position.xyz;
+    vec3 lightDirection = light.position - fs_in.position.xyz;
     float lightDistance = length(lightDirection);
     lightDirection = lightDirection / lightDistance;
 
-    float spotCos = dot(lightDirection, -direction);
+    float spotCos = dot(lightDirection, -light.direction);
     // otherwise...
-    float attenuation = 1.0 /
-        (constantAttenuation +
-         linearAttenuation * lightDistance +
-         quadraticAttenuation * lightDistance * lightDistance);
-
-    if (spotCos < cutoff)
-        attenuation = 0.0;
-    //else
-        //attenuation *= pow(spotCos, spotExp);
-
-    float intensity = 1.0 - (1.0 - spotCos)/(1.0 - cutoff);
+    attenuation = 1.0 /
+        (light.constantAttenuation +
+         light.linearAttenuation * lightDistance +
+         light.quadraticAttenuation * lightDistance * lightDistance);
 
     vec3 halfVector = normalize(lightDirection + cameraDirection);
 
-    float diffuse = max(0.0, dot(fs_in.normal, lightDirection));
-    float specular = max(0.0, dot(fs_in.normal, halfVector));
+    diffuse = max(0.0, dot(fs_in.normal, lightDirection));
+    specular = max(0.0, dot(fs_in.normal, halfVector));
 
-    if (diffuse == 0.0)
+    if (light.spotExponent < light.spotCutOff)
         specular = 0.0;
     else
-        specular = pow(specular, shininess);
-
-    scatteredLight += ambient + intensity * color * diffuse * attenuation;
-    reflectedLight += intensity * color * specular * attenuation;
+        specular *= pow(spotCos, light.spotExponent);
 }
 
 void main()
@@ -149,29 +115,22 @@ void main()
     while ((lightmask_ = lightmask_ >> 1) != 0) {
         if ((lightmask_ & 1) == 1) {
             Light light = lights[index];
+            float specular = 0.0;
+            float diffuse = 0.0;
+            float attenuation = 0.0;
             switch (light.type) {
                 case Directional:
-                    directionalLight(light.ambient, light.direction, light.color);
+                    directionalLight(light, specular, diffuse, attenuation);
                     break;
                 case Point:
-                    pointLight(light.ambient, light.position, light.color,
-                               light.constantAttenuation,
-                               light.linearAttenuation,
-                               light.quadraticAttenuation);
+                    pointLight(light, specular, diffuse, attenuation);
                     break;
                 case Spot:
-                    spotLight(light.ambient, light.position, light.direction,
-                              light.color,
-                              light.spotCutOff,
-                              light.spotExponent,
-                              light.constantAttenuation,
-                              light.linearAttenuation,
-                              light.quadraticAttenuation);
-                    break;
-                default:
-                    ambientLight(light.ambient);
+                    spotLight(light, specular, diffuse, attenuation);
                     break;
             }
+            scatteredLight += light.ambient + light.color * diffuse * attenuation;
+            reflectedLight += (((shininess + 8.0) / 8.0) * light.color) * pow(specular, shininess) * diffuse * attenuation;
         }
         index += 1;
     }

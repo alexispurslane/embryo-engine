@@ -6,6 +6,7 @@ use std::ffi::{CStr, CString};
 
 use super::data::{Cvec3, Cvec4};
 
+#[derive(Clone)]
 pub struct Shader {
     gl: Gl,
     pub id: gl::types::GLuint,

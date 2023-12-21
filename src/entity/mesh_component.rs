@@ -483,7 +483,7 @@ impl Model {
                     }),
                 specular: FactorOrTexture::Texture(specular_id),
                 normal_map: None,
-                shininess,
+                shininess: shininess * 4.2,
             }
         } else {
             let (specular_factor, diffuse_adj_factor) =
@@ -543,7 +543,7 @@ impl Model {
                     [specular_factor, specular_factor, specular_factor].into(),
                 ),
                 normal_map: None,
-                shininess,
+                shininess: shininess * 4.2,
             }
         }
     }

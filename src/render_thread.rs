@@ -28,7 +28,7 @@ use std::{
     },
 };
 
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use gl::Gl;
 use glam::Vec4Swizzles;
 
@@ -50,11 +50,13 @@ const LUMINANCE_SHADER: usize = 2;
 const LUMINANCE_SHADER2: usize = 3;
 const TONEMAP_SHADER: usize = 4;
 const GAMMA_SHADER: usize = 5;
-const BLOOM_SHADER: usize = 6;
-const DOF_SHADER: usize = 7;
+const GAUSSIAN_SHADER: usize = 6;
+const BLOOM_SHADER: usize = 7;
+const DOF_SHADER: usize = 8;
 
 pub struct RenderState {
     gl: Gl,
+    pub viewport_size: (u32, u32),
     pub camera: Option<RenderCameraState>,
     pub models: HashMap<String, Model>,
     pub shader_programs: HashMap<usize, Program>,
@@ -63,22 +65,17 @@ pub struct RenderState {
     pub lights_ubo: BufferObject<ShaderLight>,
     pub lights_dirty: bool,
     pub lights: Box<Vec<ShaderLight>>,
-    pub hdr_framebuffer: FramebufferObject,
-    pub hdr_vbo: BufferObject<VertexPos>,
-    pub hdr_vao: VertexArrayObject,
+    pub sdr_vao: VertexArrayObject,
     pub luminance_avg: Texture<R16F>,
     pub luminance_histogram: BufferObject<u32>,
+    pub hdr_framebuffer: FramebufferObject,
 }
 
 impl RenderState {
-    pub fn new(gl: &Gl, width: usize, height: usize) -> Self {
-        let vbo = BufferObject::<VertexPos>::new_with_vec(
-            &gl,
-            gl::ARRAY_BUFFER,
-            &utils::primitives::QUAD,
-        );
+    pub fn new(gl: &Gl, width: u32, height: u32) -> Self {
         RenderState {
             gl: gl.clone(),
+            viewport_size: (width, height),
             camera: None,
             shader_programs: HashMap::new(),
             models: HashMap::new(),
@@ -105,29 +102,46 @@ impl RenderState {
                         color_attachment_point: Some(gl::COLOR_ATTACHMENT0),
                         ..Default::default()
                     },
-                    width,
-                    height,
+                    width as usize,
+                    height as usize,
+                    1,
+                ));
+                fbo.attach(Texture::<RGBA16F>::new_allocated(
+                    &gl,
+                    TextureParameters {
+                        mips: 1,
+                        color_attachment_point: Some(gl::COLOR_ATTACHMENT1),
+                        ..Default::default()
+                    },
+                    width as usize,
+                    height as usize,
                     1,
                 ));
                 fbo.attach(
                     Renderbuffer::<DepthComponent24>::new_with_size_and_attachment(
                         &gl,
-                        width,
-                        height,
+                        width as usize,
+                        height as usize,
                         gl::DEPTH_ATTACHMENT,
                     ),
                 );
+                fbo.draw_to_buffers(&[gl::COLOR_ATTACHMENT0, gl::COLOR_ATTACHMENT1]);
                 fbo
             },
-            hdr_vao: {
+            sdr_vao: {
                 let vao = VertexArrayObject::new(&gl);
                 vao.bind();
+                let vbo = BufferObject::<VertexPos>::new_with_vec(
+                    &gl,
+                    gl::ARRAY_BUFFER,
+                    &utils::primitives::QUAD,
+                );
                 vbo.bind();
                 vbo.setup_vertex_attrib_pointers();
                 vao.unbind();
+                std::mem::forget(vbo);
                 vao
             },
-            hdr_vbo: vbo,
             luminance_avg: Texture::new_allocated(
                 &gl,
                 TextureParameters {
@@ -177,17 +191,17 @@ impl RenderState {
             );
         }
 
+        let passthrough = shaders::Shader::from_file(
+            &self.gl,
+            "./data/shaders/passthrough.vert",
+            gl::VERTEX_SHADER,
+        )
+        .map_err(|e| {
+            println!("Could not compile vertex shader. Errors:\n{}", e);
+            std::process::exit(1);
+        })
+        .unwrap();
         {
-            let vert_shader = shaders::Shader::from_file(
-                &self.gl,
-                "./data/shaders/passthrough.vert",
-                gl::VERTEX_SHADER,
-            )
-            .map_err(|e| {
-                println!("Could not compile vertex shader. Errors:\n{}", e);
-                std::process::exit(1);
-            })
-            .unwrap();
             let frag_shader = shaders::Shader::from_file(
                 &self.gl,
                 "./data/shaders/hdr.frag",
@@ -200,7 +214,7 @@ impl RenderState {
             .unwrap();
             self.shader_programs.insert(
                 TONEMAP_SHADER,
-                Program::from_shaders(&self.gl, &[vert_shader, frag_shader]).unwrap(),
+                Program::from_shaders(&self.gl, &[passthrough.clone(), frag_shader]).unwrap(),
             );
         }
 
@@ -346,22 +360,11 @@ impl RenderState {
             systems::integrate_loaded_models(&gl, resource_manager, self);
 
             // Render world to HDR framebuffer
-            self.hdr_framebuffer.bind_to(gl::FRAMEBUFFER);
-
-            utils::setup_viewport(&gl, window.size());
-            utils::clear_screen(&gl);
-
             self.render(round_robin_buffer);
 
-            round_robin_buffer = (round_robin_buffer + 1) % 3;
-
-            self.hdr_framebuffer.unbind();
-
-            utils::setup_viewport(&gl, window.size());
-            utils::clear_screen(&gl);
-
+            // Render HDR buffer to screen with tone mapping, gamma correction, and auto exposure
             let avg_dt = ((last_dts[0] + last_dts[1] + dt as f32) / 3.0).round();
-            self.render_hdr(window.size(), avg_dt);
+            self.render_hdr(avg_dt, lag as f32);
 
             // Update ui
             platform.prepare_frame(imgui, &window, &event_pump);
@@ -371,12 +374,19 @@ impl RenderState {
             // Render ui
             renderer.render(imgui);
 
-            // Display
+            // Swap buffers!
             window.gl_swap_window();
+            round_robin_buffer = (round_robin_buffer + 1) % 3;
         }
     }
 
-    pub fn render_hdr(&mut self, (width, height): (u32, u32), avg_dt: f32) {
+    pub fn render_hdr(&mut self, avg_dt: f32, lag: f32) {
+        utils::setup_viewport(&self.gl, self.viewport_size);
+        utils::clear_screen(&self.gl);
+
+        let hdrImage = self
+            .hdr_framebuffer
+            .get_attachment_mut::<Texture<RGBA16F>>(0);
         let minLogLum = -8.0f32;
         let maxLogLum = 3.5f32;
         let tau = 1.1f32;
@@ -389,21 +399,23 @@ impl RenderState {
                 [
                     minLogLum,
                     1.0 / (maxLogLum - minLogLum),
-                    width as f32,
-                    height as f32,
+                    self.viewport_size.0 as f32,
+                    self.viewport_size.1 as f32,
                 ]
                 .into(),
             );
 
-            let texbuf = self.hdr_framebuffer.get_attachment::<Texture<RGBA16F>>(0);
             self.gl
-                .BindImageTexture(0, texbuf.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
+                .BindImageTexture(0, hdrImage.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
 
             self.gl
                 .BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, self.luminance_histogram.id);
 
-            self.gl
-                .DispatchCompute(width.div_ceil(16) as u32, height.div_ceil(16) as u32, 1);
+            self.gl.DispatchCompute(
+                self.viewport_size.0.div_ceil(16) as u32,
+                self.viewport_size.1.div_ceil(16) as u32,
+                1,
+            );
 
             self.shader_programs[&LUMINANCE_SHADER2].set_used();
 
@@ -413,10 +425,33 @@ impl RenderState {
                     minLogLum,
                     maxLogLum - minLogLum,
                     timeCoeff,
-                    (width * height) as f32,
+                    (self.viewport_size.0 * self.viewport_size.1) as f32,
                 ]
                 .into(),
             );
+
+            if lag >= 16.0 {
+                let mut pixels = BytesMut::with_capacity(4);
+                pixels.set_len(4);
+                self.gl.GetTextureSubImage(
+                    self.luminance_avg.id,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    gl::RED,
+                    gl::FLOAT,
+                    4,
+                    pixels.as_mut_ptr() as *mut std::ffi::c_void,
+                );
+                println!(
+                    "{:?}",
+                    f32::from_le_bytes(pixels.split_at(4).0.try_into().unwrap())
+                );
+            }
 
             self.gl.BindImageTexture(
                 0,
@@ -434,7 +469,7 @@ impl RenderState {
             self.gl.DispatchCompute(1, 1, 1);
 
             self.shader_programs[&TONEMAP_SHADER].set_used();
-            self.shader_programs[&LUMINANCE_SHADER2].set_uniform_4f(
+            self.shader_programs[&TONEMAP_SHADER].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [4.9, 0.0, 0.0, 0.0].into(),
             );
@@ -447,18 +482,22 @@ impl RenderState {
                 gl::READ_WRITE,
                 gl::R16F,
             );
-            let texbuf = self.hdr_framebuffer.get_attachment::<Texture<RGBA16F>>(0);
             self.gl
-                .BindImageTexture(1, texbuf.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
+                .BindImageTexture(1, hdrImage.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
 
-            self.hdr_vao.bind();
-            self.hdr_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
-            self.hdr_vao.unbind();
+            self.sdr_vao.bind();
+            self.sdr_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+            self.sdr_vao.unbind();
         }
     }
 
     pub fn render(&mut self, round_robin_buffer: usize) {
         if let Some(camera) = self.camera.as_ref() {
+            self.hdr_framebuffer.bind_to(gl::FRAMEBUFFER);
+
+            utils::setup_viewport(&self.gl, self.viewport_size);
+            utils::clear_screen(&self.gl);
+
             // In the future, the list of lights will be a constant-size list stored on
             // RenderState and passed to it from game state, but for now...
             let mut last_shader_program_index = 0;
@@ -585,6 +624,7 @@ impl RenderState {
                 }
             }
         }
+        self.hdr_framebuffer.unbind();
     }
 }
 
@@ -632,7 +672,7 @@ pub fn light_component_to_shader_light(
         Directional { color, ambient } => ShaderLight {
             light_type: 1,
             ambient: Cvec3::from_glam(*ambient),
-            color: Cvec3::from_glam(*color),
+            color: Cvec3::from_glam(*color / std::f32::consts::PI),
 
             position: Cvec3::zero(),
             direction: Cvec3::from_glam(transform.transform.rot * glam::Vec3::Z),
@@ -654,7 +694,7 @@ pub fn light_component_to_shader_light(
         } => ShaderLight {
             light_type: 2,
             ambient: Cvec3::from_glam(*ambient),
-            color: Cvec3::from_glam(*color),
+            color: Cvec3::from_glam(*color / std::f32::consts::PI),
 
             position: Cvec3::from_glam(transform.transform.trans),
             direction: Cvec3::zero(),
@@ -678,7 +718,7 @@ pub fn light_component_to_shader_light(
         } => ShaderLight {
             light_type: 3,
             ambient: Cvec3::from_glam(*ambient),
-            color: Cvec3::from_glam(*color),
+            color: Cvec3::from_glam(*color / std::f32::consts::PI),
 
             position: Cvec3::from_glam(transform.transform.trans),
             direction: Cvec3::from_glam(transform.transform.rot * glam::Vec3::Z),
