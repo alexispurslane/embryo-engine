@@ -467,3 +467,27 @@ pub mod primitives {
         ];
     }
 }
+
+pub mod necronomicon {
+    use std::cell::{Ref, RefCell, RefMut};
+
+    pub struct YogSothoth<'a, T> {
+        inner: Ref<'a, RefCell<T>>,
+    }
+
+    impl<'a, T> YogSothoth<'a, T> {
+        pub fn summon_from_the_deeps(inner: Ref<'a, RefCell<T>>) -> Self {
+            Self { inner }
+        }
+        pub fn borrow(&self) -> Ref<'_, T> {
+            self.inner.borrow()
+        }
+        pub fn borrow_mut(&self) -> RefMut<'_, T> {
+            self.inner.borrow_mut()
+        }
+    }
+
+    pub fn fhtengen<T>(x: &RefCell<RefCell<T>>) -> YogSothoth<T> {
+        YogSothoth { inner: x.borrow() }
+    }
+}

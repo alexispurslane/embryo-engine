@@ -15,10 +15,13 @@ use crate::{
     resource_manager::ResourceManager,
     systems,
     update_thread::GameStateEvent,
-    utils, CONFIG,
+    utils::{self, necronomicon},
+    CONFIG,
 };
 use std::{
     any::Any,
+    borrow::BorrowMut,
+    cell::{Cell, Ref, RefCell, RefMut},
     collections::HashMap,
     ffi::{CStr, CString},
     sync::{
@@ -54,28 +57,103 @@ const GAUSSIAN_SHADER: usize = 6;
 const BLOOM_SHADER: usize = 7;
 const DOF_SHADER: usize = 8;
 
+pub type PipelineFunction =
+    dyn FnMut(&mut RenderState, RefMut<FramebufferObject>, RefMut<FramebufferObject>) -> Vec<u32>;
+pub type RenderPipeline = Vec<Box<PipelineFunction>>;
+
+const HDR_ATTACHMENT: u32 = 0;
+const DEPTH_ATTACHMENT: u32 = 1;
+const BRIGHT_PASS_ATTACHMENT: u32 = 2;
+const GAUSSIAN_ATTACHMENT: u32 = 3;
+
 pub struct RenderState {
     gl: Gl,
+
+    // Statistical housekeeping
+    pub avg_dt: f32,
+    pub lag: f32,
     pub viewport_size: (u32, u32),
+    pub round_robin_buffer: usize,
+
+    // High level render state received from game state
     pub camera: Option<RenderCameraState>,
     pub models: HashMap<String, Model>,
-    pub shader_programs: HashMap<usize, Program>,
     pub entity_generations: HashMap<EntityID, usize>,
     pub entity_transforms: Box<Vec<Option<glam::Mat4>>>,
+    pub lights: Box<Vec<ShaderLight>>,
+
+    // Low level render state that needs to stick around *somewhere*
+    pub shader_programs: HashMap<usize, Program>,
     pub lights_ubo: BufferObject<ShaderLight>,
     pub lights_dirty: bool,
-    pub lights: Box<Vec<ShaderLight>>,
-    pub sdr_vao: VertexArrayObject,
+    pub quad_vao: VertexArrayObject,
     pub luminance_avg: Texture<R16F>,
     pub luminance_histogram: BufferObject<u32>,
-    pub hdr_framebuffer: FramebufferObject,
 }
 
 impl RenderState {
+    fn create_fbo(gl: &Gl, width: u32, height: u32) -> FramebufferObject {
+        let mut fbo = FramebufferObject::new(&gl);
+
+        // HDR scene attachment
+        fbo.attach(Texture::<RGBA16F>::new_allocated(
+            &gl,
+            TextureParameters {
+                mips: 1,
+                color_attachment_point: Some(gl::COLOR_ATTACHMENT0),
+                ..Default::default()
+            },
+            width as usize,
+            height as usize,
+            1,
+        ));
+
+        // Depth attachment
+        fbo.attach(
+            Renderbuffer::<DepthComponent24>::new_with_size_and_attachment(
+                &gl,
+                width as usize,
+                height as usize,
+                gl::DEPTH_ATTACHMENT,
+            ),
+        );
+
+        // Bright pass
+        fbo.attach(Texture::<RGBA16F>::new_allocated(
+            &gl,
+            TextureParameters {
+                mips: 1,
+                color_attachment_point: Some(gl::COLOR_ATTACHMENT2),
+                ..Default::default()
+            },
+            width as usize,
+            height as usize,
+            1,
+        ));
+
+        // Gaussian blurred
+        fbo.attach(Texture::<RGBA16F>::new_allocated(
+            &gl,
+            TextureParameters {
+                mips: 1,
+                color_attachment_point: Some(gl::COLOR_ATTACHMENT3),
+                ..Default::default()
+            },
+            width as usize,
+            height as usize,
+            1,
+        ));
+
+        fbo
+    }
+
     pub fn new(gl: &Gl, width: u32, height: u32) -> Self {
         RenderState {
             gl: gl.clone(),
+            avg_dt: 0.0,
+            lag: 0.0,
             viewport_size: (width, height),
+            round_robin_buffer: 0,
             camera: None,
             shader_programs: HashMap::new(),
             models: HashMap::new(),
@@ -93,42 +171,7 @@ impl RenderState {
             },
             lights_dirty: true,
             lights: Box::new(vec![]),
-            hdr_framebuffer: {
-                let mut fbo = FramebufferObject::new(&gl);
-                fbo.attach(Texture::<RGBA16F>::new_allocated(
-                    &gl,
-                    TextureParameters {
-                        mips: 1,
-                        color_attachment_point: Some(gl::COLOR_ATTACHMENT0),
-                        ..Default::default()
-                    },
-                    width as usize,
-                    height as usize,
-                    1,
-                ));
-                fbo.attach(Texture::<RGBA16F>::new_allocated(
-                    &gl,
-                    TextureParameters {
-                        mips: 1,
-                        color_attachment_point: Some(gl::COLOR_ATTACHMENT1),
-                        ..Default::default()
-                    },
-                    width as usize,
-                    height as usize,
-                    1,
-                ));
-                fbo.attach(
-                    Renderbuffer::<DepthComponent24>::new_with_size_and_attachment(
-                        &gl,
-                        width as usize,
-                        height as usize,
-                        gl::DEPTH_ATTACHMENT,
-                    ),
-                );
-                fbo.draw_to_buffers(&[gl::COLOR_ATTACHMENT0, gl::COLOR_ATTACHMENT1]);
-                fbo
-            },
-            sdr_vao: {
+            quad_vao: {
                 let vao = VertexArrayObject::new(&gl);
                 vao.bind();
                 let vbo = BufferObject::<VertexPos>::new_with_vec(
@@ -159,6 +202,36 @@ impl RenderState {
                 0,
                 256,
             ),
+        }
+    }
+
+    fn run_pipeline(
+        &mut self,
+        gl: &Gl,
+        ping: necronomicon::YogSothoth<FramebufferObject>,
+        pong: necronomicon::YogSothoth<FramebufferObject>,
+        pipeline: &mut RenderPipeline,
+    ) {
+        let len = pipeline.len();
+        for (stage, function) in pipeline.iter_mut().enumerate() {
+            let (mut in_fbo, mut out_fbo) = if stage % 2 == 0 {
+                (ping.borrow_mut(), pong.borrow_mut())
+            } else {
+                (pong.borrow_mut(), ping.borrow_mut())
+            };
+
+            in_fbo.bind_to(gl::READ_FRAMEBUFFER);
+
+            // If it's the last stage, draw to window framebuffer
+            if stage == len - 1 {
+                unsafe {
+                    gl.BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+                }
+            } else {
+                out_fbo.bind_to(gl::DRAW_FRAMEBUFFER);
+            }
+
+            function(self, in_fbo, out_fbo);
         }
     }
 
@@ -311,18 +384,32 @@ impl RenderState {
         let mut last_time = start_time.elapsed().as_millis();
         let mut dt;
         let mut last_dts: [f32; 2] = [0.0, 0.0];
-        let mut lag = 0;
-        let mut round_robin_buffer = 0;
+
+        let ping = RefCell::new(RefCell::new(Self::create_fbo(
+            &gl,
+            self.viewport_size.0,
+            self.viewport_size.1,
+        )));
+        let pong = RefCell::new(RefCell::new(Self::create_fbo(
+            &gl,
+            self.viewport_size.0,
+            self.viewport_size.1,
+        )));
+        let mut pipeline = vec![
+            Box::new(Self::render) as Box<PipelineFunction>,
+            Box::new(Self::render_hdr) as Box<PipelineFunction>,
+        ];
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Track time
             let time = start_time.elapsed().as_millis();
 
-            dt = time - last_time;
+            dt = (time - last_time) as f32;
             last_time = time;
             last_dts[0] = last_dts[1];
-            last_dts[1] = dt as f32;
-            lag += dt;
+            last_dts[1] = dt;
+            self.lag += dt;
+            self.avg_dt = ((last_dts[0] + last_dts[1] + dt as f32) / 3.0).round();
 
             let mut event_pump = sdl_context.event_pump().unwrap();
             let mouse_util = sdl_context.mouse();
@@ -330,7 +417,7 @@ impl RenderState {
                 self.merge_changes(new_render_state);
             }
 
-            if lag > CONFIG.performance.update_interval as u128 {
+            if self.lag > CONFIG.performance.update_interval as f32 {
                 for event in event_pump.poll_iter() {
                     platform.handle_event(imgui, &event);
                     match event {
@@ -354,43 +441,44 @@ impl RenderState {
                         ))
                         .unwrap();
                 }
-                lag = 0;
+                self.lag = 0.0;
             }
 
             systems::integrate_loaded_models(&gl, resource_manager, self);
 
-            // Render world to HDR framebuffer
-            self.render(round_robin_buffer);
-
-            // Render HDR buffer to screen with tone mapping, gamma correction, and auto exposure
-            let avg_dt = ((last_dts[0] + last_dts[1] + dt as f32) / 3.0).round();
-            self.render_hdr(avg_dt, lag as f32);
+            let (ping, pong) = (
+                necronomicon::YogSothoth::summon_from_the_deeps(ping.borrow()),
+                necronomicon::YogSothoth::summon_from_the_deeps(pong.borrow()),
+            );
+            self.run_pipeline(&gl, ping, pong, &mut pipeline);
 
             // Update ui
             platform.prepare_frame(imgui, &window, &event_pump);
             let ui = imgui.new_frame();
-            interfaces::performance_stats_window(ui, &self, avg_dt);
+            interfaces::performance_stats_window(ui, &self, self.avg_dt);
 
             // Render ui
             renderer.render(imgui);
 
             // Swap buffers!
             window.gl_swap_window();
-            round_robin_buffer = (round_robin_buffer + 1) % 3;
+            self.round_robin_buffer = (self.round_robin_buffer + 1) % 3;
         }
     }
 
-    pub fn render_hdr(&mut self, avg_dt: f32, lag: f32) {
+    pub fn render_hdr(
+        &mut self,
+        source_fbo: RefMut<FramebufferObject>,
+        dest_fbo: RefMut<FramebufferObject>,
+    ) -> Vec<u32> {
         utils::setup_viewport(&self.gl, self.viewport_size);
         utils::clear_screen(&self.gl);
 
-        let hdrImage = self
-            .hdr_framebuffer
-            .get_attachment_mut::<Texture<RGBA16F>>(0);
+        let hdrImage = source_fbo.get_attachment::<Texture<RGBA16F>>(HDR_ATTACHMENT as usize);
         let minLogLum = -8.0f32;
         let maxLogLum = 3.5f32;
         let tau = 1.1f32;
-        let timeCoeff = (1.0 - (-(1000.0 / avg_dt) * tau).exp()).clamp(0.0, 1.0);
+        let timeCoeff = (1.0 - (-(1000.0 / self.avg_dt) * tau).exp()).clamp(0.0, 1.0);
         unsafe {
             self.shader_programs[&LUMINANCE_SHADER].set_used();
 
@@ -430,7 +518,7 @@ impl RenderState {
                 .into(),
             );
 
-            if lag >= 16.0 {
+            if self.lag >= 16.0 {
                 let mut pixels = BytesMut::with_capacity(4);
                 pixels.set_len(4);
                 self.gl.GetTextureSubImage(
@@ -485,16 +573,23 @@ impl RenderState {
             self.gl
                 .BindImageTexture(1, hdrImage.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
 
-            self.sdr_vao.bind();
-            self.sdr_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
-            self.sdr_vao.unbind();
+            self.quad_vao.bind();
+            self.quad_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+            self.quad_vao.unbind();
         }
+        vec![0]
     }
 
-    pub fn render(&mut self, round_robin_buffer: usize) {
+    pub fn render(
+        &mut self,
+        _source_fbo: RefMut<FramebufferObject>,
+        dest_fbo: RefMut<FramebufferObject>,
+    ) -> Vec<u32> {
+        dest_fbo.draw_to_buffers(&[
+            gl::COLOR_ATTACHMENT0 + HDR_ATTACHMENT,
+            gl::COLOR_ATTACHMENT0 + BRIGHT_PASS_ATTACHMENT,
+        ]);
         if let Some(camera) = self.camera.as_ref() {
-            self.hdr_framebuffer.bind_to(gl::FRAMEBUFFER);
-
             utils::setup_viewport(&self.gl, self.viewport_size);
             utils::clear_screen(&self.gl);
 
@@ -512,7 +607,7 @@ impl RenderState {
                 &mut self.lights_ubo,
                 camera,
                 &self.lights,
-                round_robin_buffer,
+                self.round_robin_buffer,
             );
             utils::shader_set_lightmask(&program, 0b11111111111111111111111111111111);
 
@@ -532,7 +627,7 @@ impl RenderState {
                         &mut self.lights_ubo,
                         camera,
                         &self.lights,
-                        round_robin_buffer,
+                        self.round_robin_buffer,
                     );
                 }
 
@@ -543,7 +638,7 @@ impl RenderState {
                         &mut self.lights_ubo,
                         camera,
                         &self.lights,
-                        round_robin_buffer,
+                        self.round_robin_buffer,
                     );
                     self.lights_dirty = false;
                 }
@@ -624,7 +719,7 @@ impl RenderState {
                 }
             }
         }
-        self.hdr_framebuffer.unbind();
+        vec![0, 1]
     }
 }
 

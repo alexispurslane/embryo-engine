@@ -1,7 +1,7 @@
 #version 430 core
 
 layout (binding = 0, rgba16f) uniform image2D hdrImage;
-layout (binding = 0, rgba16f) uniform image2D blurImage;
+uniform sampler2D blurImage;
 
 uniform float sceneFactor = 1.0;
 uniform float bloomFactor = 1.0;
