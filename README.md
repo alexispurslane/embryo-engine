@@ -47,7 +47,7 @@ are not even implemented.
   pursuing that. Therefore, I'm using Rust instead of C++ to save myself
   segfaults and memory leaks, I'm using OpenGL 4.6 with AZDO techniques instead
   of Vulkan[^5], I'm using preexisting physics middleware, and I'm targeting a hybrid of the level of technology of 7th-generation
-  (2005-2010 or so) games and earlier PC games (1998-2000 or so).
+  (2005-2010 or so) games and earlier PC games (1998-2005 or so).
 
 ## Motivation
 
@@ -272,24 +272,17 @@ be able to match, and beyond that, I'm not going to worry about it, besides
 making the engine extensible so that it's a good platform for doing more
 advanced things if people want to. Everything is a tradeoff between benefit and
 complexity, and for my limitations as an individual programmer, I've found that
-the graphics algorithms and similar capabilities of 7th generation games seem to
+the graphics algorithms and similar capabilities of 7th generation games or earlier seem to
 be at the sweet spot of that tradeoff for me: any increase in capability
 increases complexity at a vastly disproportional rate compared to the actual
-tangible gains received (despite the gains being *very* large!), whereas any
+tangible gains received in the meaningful expressiveness of the game engine (not just shininess), especially given that the sheer power of modern hardware removes the real biggest limitations on the scope and expressivity of games of those eras, whereas any
 decrease in capability diminishes the complexity of this endeavor only slightly,
 while walling off large portions of game expressiveness --- the types of games
-and visuals that can be made with the engine's technology. The era of Oblivian
-and Fallout 3 is the first era in gaming where really big, large scale, fairly
-immersive worlds could be crafted with many simulation elements, but before the
-industry got quite as big and mind-bogglingly advanced as it is today.
+and visuals that can be made with the engine's technology. The era of games stretching from Thief in 1998 to Oblivian in 2006
+and Fallout 3 in 2008 is the first era in gaming where really big, large scale, fairly immersive worlds could be crafted with many simulation elements, but before the industry got quite as big and mind-bogglingly advanced as it is today.
 
-Of course, I'm not blindly aiming for one level of technology. I'm using more
-advanced data-oriented design, more modern graphics programming techniques and
-APIs, and most importantly of all, the actual software architecture
-underpinnings of my engine, like its object model and multiprocessing model, are
-as advanced as I can feasibly make them, meaning that although it may look old
-on the surface, this engine will have fresh, shiny, and well thought through,
-modern internals. It's a sleeper, in effect.
+Of course, I'm not blindly aiming for one level of technology. I'm using modern software architecture, data structures, and algorithms to make the engine performant and flexible and capable of taking advantage of modern hardware. i'm using modern data-oriented design, modern graphics programming techniques and
+APIs, and modern object model and parallel processing models. Thus, although it may look old on the surface, this engine will have fresh, shiny, and well thought through, modern internals. In effect I'm doing what pixel art indie devs have been doing for quite awhile now, keeping the scope and difficulty of developing their game's graphics and content limited by picking an old style of game to make with modern tools, so you get the productivity of modern tools brought to bear on simpler problems --- I'm just doing that for the polygon era, not the pixelated era!
 
 Of course, this means it probably isn't for everybody, or even anybody, but,
 well. I'm making the program ;)
