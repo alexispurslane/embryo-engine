@@ -1,3 +1,11 @@
+/*
+ * Copyright (C) 2023 Alexis Purslane <alexispurslane@pm.me>
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
@@ -30,6 +38,7 @@ use std::{
     },
 };
 use update_thread::{GameState, GameStateEvent};
+use utils::config::WindowMode;
 
 mod entity;
 mod events;
@@ -56,12 +65,22 @@ pub fn main() {
     gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
     gl_attr.set_context_version(4, 6);
 
-    let window = video_subsystem
-        .window("Project Gilgamesh v0.1.0", 1920, 1080)
-        .position_centered()
-        .opengl()
-        .build()
-        .unwrap();
+    let mut window_builder = video_subsystem.window("Project Gilgamesh v0.1.0", 1920, 1080);
+    window_builder.opengl();
+
+    match CONFIG.graphics.fullscreen_mode {
+        WindowMode::Windowed => {
+            window_builder.position_centered();
+        }
+        WindowMode::WindowedFullscreen => {
+            window_builder.fullscreen_desktop();
+        }
+        WindowMode::Fullscreen => {
+            window_builder.fullscreen();
+        }
+    }
+
+    let window = window_builder.build().expect("Could not create OS window!");
 
     sdl_context.mouse().set_relative_mouse_mode(true);
 

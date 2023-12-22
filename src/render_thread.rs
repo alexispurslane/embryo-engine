@@ -1,3 +1,11 @@
+/*
+ * Copyright (C) 2023 Alexis Purslane <alexispurslane@pm.me>
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+
 use crate::{
     entity::{
         light_component::LightComponent, mesh_component::Model,
@@ -62,9 +70,8 @@ pub type PipelineFunction =
 pub type RenderPipeline = Vec<Box<PipelineFunction>>;
 
 const HDR_ATTACHMENT: u32 = 0;
-const DEPTH_ATTACHMENT: u32 = 1;
-const BRIGHT_PASS_ATTACHMENT: u32 = 2;
-const GAUSSIAN_ATTACHMENT: u32 = 3;
+const BRIGHT_PASS_ATTACHMENT: u32 = 1;
+const GAUSSIAN_ATTACHMENT: u32 = 2;
 
 pub struct RenderState {
     gl: Gl,
@@ -108,22 +115,12 @@ impl RenderState {
             1,
         ));
 
-        // Depth attachment
-        fbo.attach(
-            Renderbuffer::<DepthComponent24>::new_with_size_and_attachment(
-                &gl,
-                width as usize,
-                height as usize,
-                gl::DEPTH_ATTACHMENT,
-            ),
-        );
-
         // Bright pass
         fbo.attach(Texture::<RGBA16F>::new_allocated(
             &gl,
             TextureParameters {
                 mips: 1,
-                color_attachment_point: Some(gl::COLOR_ATTACHMENT2),
+                color_attachment_point: Some(gl::COLOR_ATTACHMENT1),
                 ..Default::default()
             },
             width as usize,
@@ -136,13 +133,23 @@ impl RenderState {
             &gl,
             TextureParameters {
                 mips: 1,
-                color_attachment_point: Some(gl::COLOR_ATTACHMENT3),
+                color_attachment_point: Some(gl::COLOR_ATTACHMENT2),
                 ..Default::default()
             },
             width as usize,
             height as usize,
             1,
         ));
+
+        // Depth attachment
+        fbo.attach(
+            Renderbuffer::<DepthComponent24>::new_with_size_and_attachment(
+                &gl,
+                width as usize,
+                height as usize,
+                gl::DEPTH_ATTACHMENT,
+            ),
+        );
 
         fbo
     }
@@ -221,8 +228,6 @@ impl RenderState {
                 (pong.borrow_mut(), ping.borrow_mut())
             };
 
-            in_fbo.bind_to(gl::READ_FRAMEBUFFER);
-
             // If it's the last stage, draw to window framebuffer
             if stage == len - 1 {
                 unsafe {
@@ -254,6 +259,7 @@ impl RenderState {
                         );
                     }
                 }
+                /**/
                 unsafe {
                     self.gl
                         .NamedFramebufferReadBuffer(in_fbo.id, gl::DEPTH_ATTACHMENT);
@@ -278,6 +284,7 @@ impl RenderState {
                 out_fbo.bind_to(gl::DRAW_FRAMEBUFFER);
             }
 
+            in_fbo.bind_to(gl::READ_FRAMEBUFFER);
             attachments = function(self, in_fbo, out_fbo);
         }
     }
@@ -496,7 +503,7 @@ impl RenderState {
     ) -> Vec<u32> {
         let bright_pass =
             source_fbo.get_attachment::<Texture<RGBA16F>>(BRIGHT_PASS_ATTACHMENT as usize);
-        dest_fbo.draw_to_buffers(&[GAUSSIAN_ATTACHMENT]);
+        dest_fbo.draw_to_buffers(&[gl::COLOR_ATTACHMENT0 + GAUSSIAN_ATTACHMENT]);
         unsafe {
             self.shader_programs[&GAUSSIAN_SHADER].set_used();
             self.gl.BindImageTexture(
@@ -523,7 +530,7 @@ impl RenderState {
     ) -> Vec<u32> {
         let bright_pass =
             source_fbo.get_attachment::<Texture<RGBA16F>>(GAUSSIAN_ATTACHMENT as usize);
-        dest_fbo.draw_to_buffers(&[GAUSSIAN_ATTACHMENT]);
+        dest_fbo.draw_to_buffers(&[gl::COLOR_ATTACHMENT0 + GAUSSIAN_ATTACHMENT]);
         unsafe {
             self.shader_programs[&GAUSSIAN_SHADER].set_used();
             self.gl.BindImageTexture(
@@ -550,14 +557,22 @@ impl RenderState {
         let hdr_image = source_fbo.get_attachment::<Texture<RGBA16F>>(HDR_ATTACHMENT as usize);
         let gaussian_image =
             source_fbo.get_attachment::<Texture<RGBA16F>>(GAUSSIAN_ATTACHMENT as usize);
-        dest_fbo.draw_to_buffers(&[HDR_ATTACHMENT]);
+        dest_fbo.draw_to_buffers(&[gl::COLOR_ATTACHMENT0 + HDR_ATTACHMENT]);
         unsafe {
             self.shader_programs[&BLOOM_SHADER].set_used();
+
             self.gl
                 .BindImageTexture(0, hdr_image.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
+
             gaussian_image.bind(0);
             self.shader_programs[&BLOOM_SHADER]
                 .set_uniform_1ui(&CString::new("blurImage").unwrap(), 0);
+
+            self.shader_programs[&BLOOM_SHADER]
+                .set_uniform_1f(&CString::new("sceneFactor").unwrap(), 0.0);
+            self.shader_programs[&BLOOM_SHADER]
+                .set_uniform_1f(&CString::new("bloomFactor").unwrap(), 0.0);
+
             self.quad_vao.bind();
             self.quad_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
             self.quad_vao.unbind();

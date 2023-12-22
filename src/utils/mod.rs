@@ -1,3 +1,11 @@
+/*
+ * Copyright (C) 2023 Alexis Purslane <alexispurslane@pm.me>
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+
 use std::{cell::RefMut, ffi::CString};
 
 use gl::Gl;
@@ -123,6 +131,13 @@ pub mod config {
     }
 
     #[derive(Deserialize)]
+    pub enum WindowMode {
+        Windowed,
+        WindowedFullscreen,
+        Fullscreen,
+    }
+
+    #[derive(Deserialize)]
     pub struct GraphicsConfig {
         pub min_log_luminence: f32,
         pub max_log_luminence: f32,
@@ -132,7 +147,10 @@ pub mod config {
         pub max_bloom_threshold: f32,
         pub bloom_factor: f32,
         pub scene_factor: f32,
+        pub fullscreen_mode: WindowMode,
         pub fxaa: bool,
+        pub window_width: usize,
+        pub window_height: usize,
     }
 
     #[derive(Deserialize)]
@@ -173,6 +191,9 @@ max_bloom_threshold = 1.2
 bloom_factor = 1.0
 scene_factor = 1.0
 fxaa = true
+fullscreen_mode = "WindowedFullscreen"
+window_width = 1920
+window_height = 1080
 
 [controls]
 mouse_sensitivity = 1.0

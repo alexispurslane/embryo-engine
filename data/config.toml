@@ -17,6 +17,9 @@ max_bloom_threshold = 1.2
 bloom_factor = 1.0
 scene_factor = 1.0
 fxaa = true
+fullscreen_mode = "Windowed"
+window_width = 1920
+window_height = 1080
 
 [controls]
 mouse_sensitivity = 1.0
