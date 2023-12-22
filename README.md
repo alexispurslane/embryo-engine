@@ -46,10 +46,8 @@ are not even implemented.
   games I want to make and play, and will be rigerously and singlemindedly
   pursuing that. Therefore, I'm using Rust instead of C++ to save myself
   segfaults and memory leaks, I'm using OpenGL 4.6 with AZDO techniques instead
-  of Vulkan[^5], I'm using preexisting physics middleware, and I'm targeting the level of technology of 7th-generation
-  (2005-2010 or so) games, just before the ~2015 era when
-  especially game rendering technology got significantly more complex (before the
-  switch to physically based rendering for instance).
+  of Vulkan[^5], I'm using preexisting physics middleware, and I'm targeting a hybrid of the level of technology of 7th-generation
+  (2005-2010 or so) games and earlier PC games (1998-2000 or so).
 
 ## Motivation
 
