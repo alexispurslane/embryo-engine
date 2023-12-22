@@ -9,64 +9,51 @@
 
 ---
 
-## Status: under construction
+## 🚧 Status: under construction 🚧
 
-Disclaimer: All possible descriptions of this engine at this point are aspirational at best.
+**Disclaimer**: All possible descriptions of this engine at this point are aspirational at best.
 This is not remotely ready to be downloaded and messed around with, let alone
 used for anything. Most of the core features and "selling points" of this engine
 are not even implemented.
 
 ## Core design ideas
 
-- 📝 **Truly data-driven**: Be as close to 100% data-driven as possible: all game-specific logic and
-  content should be in simple data files and scripts as much as possible, to the
-  degree that in theory players should be able to delete or replace the
-  executable in their game's folder and replace it with a freshly-compiled
-  version of the game engine and the game should still work (for the most part).
+- 📝 **Truly data-driven**: as close as possible to 100% of all game-specific logic and
+  content should be able to be placed in simple data files and scripts, strictly separate from the engine, to the
+  degree that in theory players should be able to replace the game engine
+  executable in the home folder of any game made with this engine with a freshly-compiled
+  version, and the game should still work (for the most part).
   This will make it easy to create large and complex game worlds with lots of
-  content.
+  content. **Note that due to a confusion in terminology on the part of others, this is very different from the kind of "data driven" that Bevy and Amathyst are — they mean "data driven" in the sense of data-oriented design,[^6] not actual data-driven design.**
 
-- 🔬 **Moddable with simple open file formats**: Make game data as easy to
-  create (so using simple, flexible, easy to use open standards and formats,
-  instead of proprietary or bespoke things that require special tools to create
-  or edit), edit, replace, or add to an existing game as possible. Ensure that
-  game data is dynamically replacable as much as possible, instead of compiled
-  into the executable binary. This combined with the previous point means that
-  essentially all game content will be "mods" --- both first party content and
-  third party content will be made with scripting and a simple, dynamic
-  data-driven system, meaning both that creating game content is faster, and
-  that a healthier modding community can exist.
+- 🔬 **Explicitly, maximally moddable**: game data should be as easy, accessible, and flexible to
+  create, edit, and even replace or add to an existing game, as possible. Game data should be dynamically replacable as much as possible, instead of compiled or hardcoded
+  into the executable binary. This, combined with the previous point, means that essentially *all* game content will be "mods" --- both first party content and
+  third party content. This means both that creating game content is faster, and that third party modders of these games will get unprecedented power, since their mods will have access to the full power of the complete game content creation API the engine offers, instead of a limited set of interface APIs for predefined tasks that the game developers figured mods should be able to do. This engine essentially wants to be the Emacs to most other engines' Vim --- Emacs is a relatively small core of performant C that exposes almost all of its behavioral internals for control by a dynamic scripting language, and almost all of the actual editor is built atop that using that scripting language, which means that Emacs plugins can be much more powerful and involved, even replacing core parts of the editor, because the editor itself is fully exposed to, and mostly written in, the scripting language. Whereas for instance Vim has a predefined and very separate plugin interface that basically only allows essentially automated keystrokes.
   
-- 💥 **Emergent sandbox simulation focused**: Maximize possibilities for
-  simulation and emergent behavior as much as possible through a flexible event
+- 💥 **Emergent sandbox simulation focused**: this game engine should try to maximize the possibilities for
+  simulation and emergent behavior as much as possible through an entity component system, to make dynamically mixing and matching game object properties and behaviors at runtime possible, and a flexible event
   and messaging system based on Caves of Qud's system and Erlang's actor model,
-  increasing the ways in which behavior can combine while minimizing coupling
-  and any need to predict combinatorial emergent behavior, and use a dynamic
-  entity component system so properties and behaviors are as easy to add and
-  remove from game objects at runtime (and at specification time) as possible,
-  enabling more complex, responsive, sandbox game worlds.
+  increasing the ways in which behavior can combine while minimizing tight coupling
+  or the need to predict such combinatorial emergent behavior. This will
+  enable more complex, responsive, sandbox game worlds.
   
-- 🧓 **Do old things with new tech.** The only way doing any, let alone all, of
-  this will be possible for a single person will be through leveraging modern
-  technology to my advantage to the utmost. But of course, that won't help one
-  bit if I make my goals modern as well, as program complexity and difficulty
-  has scaled probably faster than our tools have. Therefore, I've picked a
-  *past* era of video game technology I deem "good enough" for the kinds of
+- 🧓 **Do old things with new tech**: doing any, let alone all, of
+  this will be possible for a single person only through leveraging modern
+  development tools to the utmost. But of course that wouldn't help if the game engine's goals scaled up to modern levels in tandem, since program complexity and difficulty in game engine development
+  has scaled probably *faster* than our tools have. Therefore, I've picked a
+  *past* era of video game technology I deem "good enough" to allow for sufficient creativity and expressivity in the content for the kinds of
   games I want to make and play, and will be rigerously and singlemindedly
-  pursuing that, while at the same time using the most modern and
-  productivity-enhancing technology I can. Therefore, although I'm writing this
-  engine "from scratch," from the graphics driver and up so to speak, I'm
-  keeping the scope as focused as I can and refusing to do the heavy lifting
-  when I don't have to. So I'm using Rust instead of C++ to save myself
+  pursuing that. Therefore, I'm using Rust instead of C++ to save myself
   segfaults and memory leaks, I'm using OpenGL 4.6 with AZDO techniques instead
-  of Vulkan[^5], and I'm targeting the level of technology of 7th-generation
-  (2005-2010 or so) games, just before the ~2015 era when game physics and
-  especially rendering technology got significantly more complex (before the
+  of Vulkan[^5], I'm using preexisting physics middleware, and I'm targeting the level of technology of 7th-generation
+  (2005-2010 or so) games, just before the ~2015 era when
+  especially game rendering technology got significantly more complex (before the
   switch to physically based rendering for instance).
 
 ## Motivation
 
-That said, what is the motivation behind creating *yet another* game engine?
+Why make *yet another* game engine?
 
 Part of it is simply the fact that I find game engine and computer graphics
 programming fascinating --- those fields basically fully exercise every aspect
@@ -75,27 +62,25 @@ computer science (algorithms, data structures, mathematics) and everything in
 between, while at the same time being rather immediately and tangibly rewarding
 for all that hard work.
 
-The greater part of it, however, is to be found in the genres of immersive sim
-games and Bethesda-style open-world RPGs. There aren't really any engines
-specifically targeting those genre, despite the fact that such games would
-definitely benefit from a game architected around the needs and constraints of
-such designs. Perhaps if there were, more such games would exist -- perhaps all
+The greater part of my motivation, however, is to be found in the genres of  Ion Storm and Looking Glass Studios-style immersive sim games and Bethesda-style open-world RPGs. These games are so interesting and unique compared to others on the market, and even more interestingly, despite being different genres, the reasons for their uniqueness, as well as their unique technological requirements, are kind of shared if you think about it! This got me thinking about how I might go about creating a game engine specifically designed to enable the creation of these two interesting genres of games, and whether that might actually encourage people to make more of them, since they're pretty rare! There aren't really any engines
+specifically targeting these genres currently, despite the fact that such games have very unique challenges to go with their unique merits and so would
+definitely stand to benefit from a game engine architected around their needs and constraints. Maybe if there were such an engine, more such games would exist -- perhaps all
 that is necessary for small-studio Bethesda-style open world RPGs to crop up is an engine that
 accelerates development of such games! After all, almost no one is truly serving
 that market. Likewise for immersive sims.
 
-How could an engine focus on enabling such games?
+How could an engine focus on enabling such games, though?
 
 Well, one of the things that truly makes *Bethesda's* games special is their
 engine, NetImmerse / Gamebryo / Creation Engine. Despite the bad rap it gets ---
 all of it largely undeserved, since it is not really any older than any other
 mainstream engine, such as Unreal, has been used to make many other perfectly
 good games outside of Bethesda, and is not really more fundamentally flawed than
-they are (compare with Unreal struggling to take advantage of modern multicore
-processors because of its outdated parallel processing architecture) --- it is
-largely responsible for the unique gameplay character and feel of their games,
-which are far more simulation heavy and dynamic than other games. There are
+other engines are (compare with Unreal struggling to take advantage of modern multicore
+processors because of its outdated parallel processing architecture) --- it is largely what is responsible for the unique gameplay character and feel of their games: far more simulation heavy and dynamic than other games. Likewise, its specific design approach is probably partly responsible for Bethesda's ability to put as much sheer content in their games as they do, and certainly responsible for the singular moddability of their games. There are
 several lessons to be learned from Gamebryo, which I will explore more below.
+
+The lesson to learn from immersive sims, on the other hand, are more focused around design requirements, not specific technical aspects, but one does directly lead to another. To enable immersive sim style gameplay as much as possible, game object behavior and properties need to be extremely modular and encapsulated, to avoid overwhelming complexity, dynamically composable, to allow for great runtime freedom, and capable of influencing other properties and especially behavior *without explicit coupling*, so unforseen combinations can occur. Luckily, there are systems used in the *System Shock*, *Thief*, and *Caves of Qud* games that can help us with this. For more see below.
 
 ## Deeper exploration of design principls
 
@@ -112,7 +97,7 @@ language itself and/or statically linked to the engine. This is to *some* degree
 similar to how many modern engines, such as RedEngine, Unreal, and Unity, act as
 one monolithic structure that is then controlled via a scripting language, but
 substantially different in practice. It is a matter of degree, not kind, but it
-is a very large degree of difference nontheless. There is a reason Bethesda's
+is a very large degree of difference nonetheless. There is a reason Bethesda's
 own first-party DLC content for their games takes the exact same form that large
 community content mods do, which cannot be said for any other engine.
 
@@ -182,23 +167,21 @@ through an emotional scene without the physics engine getting in the way.
 Nevertheless, there is a crucial spot in the gaming world for such sandbox style
 games. In fact, there's a whole genre built around the idea that everything in
 the game world should be simulated and responsive to any reasonable thing you
-might want to try: immersive sims. From System Shock 2 to Deus Ex to Prey, the
-key appeal of immersive sims is that you are given a large amount of powerful
-tools, and set loose on a problem in an interesting environment, to solve it
+might want to try: immersive sims. From *System Shock 2* to *Deus Ex* to *Thief*, the key appeal of immersive sims is that you are given a large amount of powerful
+tools, and set loose on a problem in an interesting, endlessly responsive environment, to solve it
 however you like.
 
 It may not seem obvious how to create a game engine that enables and accelerates
 the development of such simulation-heavy games, besides perhaps mandating that
 every game object have a mesh and a rigid body (a bad idea), but in watching
 gameplay from Deus Ex and Pray, as well as simulation-focused roguelikes like
-Dwarf Fortress and Caves of Qud[^2], a few things became clear. First of all,
+Dwarf Fortress and Caves of Qud[^2], a few things become clear. First of all,
 you need to be able to dynamically add and remove properties and behaviors from
-objects in combinations and at times that are not predictable ahead of time;
+objects in combinations and at times that are not predictable ahead of time, and that to manage the complexity of such an endeavor, behavior and properties must be decoupled, encapsulated, and composable;
 second of all, that those behaviors, as well as individual game objects and
 actors, need to be able to effect each other's behavior without prior
 expectation of being able to do so; and finally, that specifying these packages
-of behavior and properties be as easy and declarative as possible. Let's look at
-each of these in turn.
+of behavior and properties be as composible and declarative as possible. Let's look at each of these in turn.
 
 - The first point could be simplistically enabled by just using a single game
   object class for everything in the entire game, so that it contains all the
@@ -211,13 +194,12 @@ each of these in turn.
   and probably being difficult to maintain. An easier way is to use a simple
   entity component system. This way, entities are just columns in a big table,
   and components can be easily and dynamically added and removed from entities
-  as needed, where components represent the properties of an object and what
-  behavior is desired, but behavior itself is separated.
+  as needed, where components represent compsible and encapsulated units of game object properties and behavior is desired (and behavior itself is separated).
 
 - One of the problems with the design of a classic entity component system,
   however, is that since all object behavior is defined in terms of systems,
   which loop through all the entities with the necessary properties to have a
-  behavior and perform that behavior for each entity, all combinatorial behavior
+  behavior and perform that behavior for each entity, communication between behaviors or systems is difficult, and all combinatorial behavior
   must be specified up front: if I want a new behavior to emerge when an entity
   has two components at the same time, I have to either program that behavior
   into one of the existing systems for those components, or create a new system
@@ -226,8 +208,8 @@ each of these in turn.
   especially true as a result of the fact that it is difficult for systems to
   pass per-entity temporary information --- events and messages --- to other
   systems in an architecturally clean and encapsulated fashion, and difficult
-  for them to manipulate the behavior of other systems from afar without tight
-  coupling between them. Many architectural questions pop up when trying to
+  for them to manipulate the behavior of other systems from afar with those messages without tight
+  coupling between them, because systems work on the basis of regular behaviors, not event-based ones. Many architectural questions pop up when trying to
   figure this out. Which system handles interlocking behavior? How does one
   system modify the information another acts on, without modifying the entity
   itself? Does the system generating the information modify the entities the
@@ -240,12 +222,11 @@ each of these in turn.
   than others, in which case it would be desirable for those entities which
   finished early to be able to move on from that step and work on other steps
   while the late ones are on the last one. This is impossible in a classic ECS
-  system. Likewise, passing information back and forth between threads in a
+  system, which essentially requires a scatter/gather structure with a sync point between each behavior, with at best a few unrelated systems running at the same time. This is precisely the sort of design that Unreal had that causes it to struggle to make use of modern multicore CPUs. Likewise, passing information back and forth between threads in a
   classic ECS structure is difficult. Thus I borrowed a concept from Erlang:
-  message-passing and Actor-oriented multithreading[^3], and a system from
+  message-passing and Actor-oriented programming[^3], and a system from
   Naughty Dog called fibers[^4]. In this model, there is a pool of operating
-  system threads, one per core, and jobs or "fibers" in Naughty Dog's
-  terminology, are generated for any processing that needs to be done that can
+  system threads, one per core, and jobs (or "fibers") that thread through one complete pipeline task that needs to be performed in order are generated for any processing that needs to be done that can
   be done in parallel, including actor behavior, and pushed onto a job stack
   which the threads then pull from whenever they're finished any previous jobs
   and begin working on. Specifically, in this case, all the behavioral
@@ -291,7 +272,7 @@ more reasonable, at least at the outset, I've set a specific era of games in
 mind that I want my engine's graphical, animation, and similar capabilities to
 be able to match, and beyond that, I'm not going to worry about it, besides
 making the engine extensible so that it's a good platform for doing more
-advanced things if people want to. Everything is tradeoff between benefit and
+advanced things if people want to. Everything is a tradeoff between benefit and
 complexity, and for my limitations as an individual programmer, I've found that
 the graphics algorithms and similar capabilities of 7th generation games seem to
 be at the sweet spot of that tradeoff for me: any increase in capability
@@ -358,3 +339,5 @@ well. I'm making the program ;)
     Book for that matter), *Real-Time Rendering* doesn't explicitly relate what
     it's talking about to WebGPU concepts, etc. Until that point, OpenGL will be
     what this engine uses. 
+
+[^6]: https://en.m.wikipedia.org/wiki/Data-oriented_design
