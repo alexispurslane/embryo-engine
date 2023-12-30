@@ -60,12 +60,13 @@ to see!
 - 📝 **Truly data-driven[^5], with a UNIX and FSF spin**: 100% of game content
   should be expressible using plain text data files and scripts, strictly
   separate from the game engine, without linking to or modifying the engine with
-  a non-scripting language. It must be possible to create a substantial game
-  from start to finish with just a compiled binary of the game engine and
-  nothing more. Moreover, instead of game data and scripts being compiled along
-  with the game engine that runs them into a single binary blob for release, the
-  game engine should remain a distinct entity that acts as an interpreter for
-  the game data, merely running whatever game content it is surrounded by as the
+  a non-scripting language. This game engine will not be a game development
+  framework like Bevy, and it must be possible to create a substantial game from
+  start to finish with just a compiled binary of the game engine and nothing
+  more. Moreover, instead of game data and scripts being compiled along with the
+  game engine that runs them into a single binary blob for release, the game
+  engine should remain a distinct entity that acts as an interpreter for the
+  game data, merely running whatever game content it is surrounded by as the
   game's executable. Thus, in theory, players should be able to completely swap
   out your game's game engine executable for another one and everything should
   still work.[^6]
