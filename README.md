@@ -58,20 +58,16 @@ to see!
 ## Core design ideas
 
 - 📝 **Truly data-driven[^5], with a UNIX and FSF spin**: 100% of game content
-  should be expressible using plain text data files and scripts, strictly
-  separate from the game engine, without linking to or modifying the engine with
-  a non-scripting language. This game engine will not be a game development
-  framework like Bevy, and it must be possible to create a substantial game from
-  start to finish with just a compiled binary of the game engine and nothing
-  more. Moreover, instead of game data and scripts being compiled along with the
-  game engine that runs them into a single binary blob for release, the game
-  engine should remain a distinct entity that acts as an interpreter for the
-  game data, merely running whatever game content it is surrounded by as the
-  game's executable. Thus, in theory, players should be able to completely swap
-  out your game's game engine executable for another one and everything should
-  still work.[^6]
+  should be expressible using data files and scripts, strictly separate from the
+  game engine, without linking to the engine like a framework or modifying it.
+  Moreover, instead of game data and scripts being compiled along with the game
+  engine into a single binary blob for release, the game engine should remain a
+  distinct entity that acts as an interpreter for the game data, when run as the
+  game's executable. In theory, players should be able to completely swap out
+  your game's game engine executable for another one and everything should still
+  work.[^6]
 
-- 🔬 **Explicitly, maximally moddable**: all game data should use open and
+- 🔬 **Intentionally moddable**: all game data should use open and
   standardized formats, and where possible these formats should also be
   plain-text and human-readable, so that as little special software as possible
   is needed to create or modify game content. Additionally, game content should
@@ -91,19 +87,19 @@ to see!
   minimizing tight coupling or the need to predict such combinatorial emergent
   behavior.
   
-- 🧓 **Old things, new tech**: this game engine targets roughly 1998-2005 level
-  computer graphics, sound, and VFX capabilities, while making the most of
-  modern hardware and productivity-enhancing tools like Rayon, OpenGL 4.6[^7], Rust,
-  and SDL 2.0. While big game studios scale the difficulty of their ambitions up
-  to match the increased productivity of modern tooling, indies turn that
-  increased productivity to things with a constant level of difficulty
+- 🧓 **Old things, new tech**: this game engine will target roughly 1998-2005
+  level computer graphics, sound, and VFX capabilities, while making the most of
+  modern hardware and productivity-enhancing tools like Rayon, OpenGL 4.6[^7],
+  Rust, and SDL 2.0. While big game studios scale the difficulty of their
+  ambitions up to match the increased productivity of modern tooling, indies
+  turn that increased productivity to things with a constant level of difficulty
   determined by past technological constraints in order to compensate for
   smaller teams and budgets. This engine will employ that same strategy.
-  Additionally, I believe the tradeoff between artistic expressiveness (not
-  visual fidelity) and algorithmic complexity peaked between roughly 1998-2005,
-  and most of that time's constraints on expressiveness were the results of
-  hardware limitations, not software ones. Therefore, with modern hardware,
-  older, simpler, and more maintainable algorithms will be perfectly acceptable.
+  Additionally, the tradeoff between artistic expressiveness (not visual
+  fidelity) and algorithmic complexity peaked between roughly 1998-2005, and
+  most of that time's constraints on expressiveness were the results of hardware
+  limitations, not software ones. Therefore, with modern hardware, older,
+  simpler, and more maintainable algorithms will be perfectly acceptable.
 
 - 🔀 **Maximize parallelism and minimize overhead**: despite the old warning
   against premature optimization, in order to make my engine as scriptable as
