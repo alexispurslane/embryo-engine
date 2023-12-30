@@ -28,7 +28,7 @@ Ion Storm[^2] like *Thief*, *System Shock 2*, or *Deus Ex*? Or the early
 open-world RPGs of Bethesda Game Studios like *Oblivion* and especially
 *Morrowind*? Do you wish more games like those existed, or do you want to make
 one of your own? Do you find yourself wishing for a game engine that is leaner,
-more genre-focused, and easier to fully understand and even modify, than
+more genre-focused, and easier to fully understand and even modify than
 mainstream offerings? Are you finding yourself fighting with mainstream
 offerings to achieve the things you want, or finding that their tools are too
 bloated, GUI-focused, confusing, and slow? Do you crave the cold certainty of
@@ -58,7 +58,7 @@ to see!
 ## Core design ideas
 
 - 📝 **Truly data-driven[^5], with a UNIX and FSF spin**: 100% of game content
-  should be expressible using plain data files and scripts, with only behavior requiring actual scripts and and everything else being declarative. Game scripts and data should be strictly separate from the
+  should be expressible using plain data files and scripts, with only actual behavior requiring scripts while everything else is specified as data. Game scripts and data should be strictly separate from the
   game engine, without linking to the engine like a framework or modifying it.
   Moreover, instead of game data and scripts being compiled along with the game
   engine into a single binary blob for release, the game engine should remain a
