@@ -58,7 +58,7 @@ to see!
 ## Core design ideas
 
 - 📝 **Truly data-driven[^5], with a UNIX and FSF spin**: 100% of game content
-  should be expressible using data files and scripts, strictly separate from the
+  should be expressible using plain data files and scripts, with only behavior requiring actual scripts and and everything else being declarative. Game scripts and data should be strictly separate from the
   game engine, without linking to the engine like a framework or modifying it.
   Moreover, instead of game data and scripts being compiled along with the game
   engine into a single binary blob for release, the game engine should remain a
