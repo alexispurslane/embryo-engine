@@ -15,7 +15,7 @@ rayon = "1.6.1"
 rand = "0.8.5"
 half = "2.3.1"
 project_gilgamesh_render_gl_derive = { path = "lib/render_gl_derive" }
-imgui = "0.11.0"
+imgui = { version = "0.11.0", features = ["docking"] }
 imgui-opengl-renderer = { path = "lib/imgui_opengl_renderer" }
 imgui-sdl2-support = { path = "lib/imgui_sdl2_support" }
 core_affinity = "0.8.1"
