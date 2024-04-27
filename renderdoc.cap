@@ -1,0 +1,28 @@
+{
+    "rdocCaptureSettings": 1,
+    "settings": {
+        "autoStart": false,
+        "commandLine": "",
+        "environment": [
+        ],
+        "executable": "/var/home/alexispurslane/Development/embryo-engine/target/debug/project-gilgamesh",
+        "inject": false,
+        "numQueuedFrames": 0,
+        "options": {
+            "allowFullscreen": true,
+            "allowVSync": true,
+            "apiValidation": true,
+            "captureAllCmdLists": true,
+            "captureCallstacks": false,
+            "captureCallstacksOnlyDraws": false,
+            "debugOutputMute": true,
+            "delayForDebugger": 0,
+            "hookIntoChildren": false,
+            "refAllResources": false,
+            "softMemoryLimit": 0,
+            "verifyBufferAccess": true
+        },
+        "queuedFrameCap": 0,
+        "workingDir": "/var/home/alexispurslane/Development/embryo-engine"
+    }
+}
