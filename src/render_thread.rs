@@ -34,6 +34,7 @@ use std::{
 use bytes::{BufMut, Bytes, BytesMut};
 use gl::Gl;
 use glam::Vec4Swizzles;
+use sdl2::event::Event;
 
 pub struct RenderStateEvent {
     pub camera: Option<RenderCameraState>,
@@ -260,6 +261,7 @@ impl RenderState {
         let shaders = shaders
             .into_iter()
             .map(|file| {
+                trace!("Loading shader './data/shaders/{file}'");
                 let shader_type = match file.rsplit_once('.').unwrap().1 {
                     "comp" => gl::COMPUTE_SHADER,
                     "frag" => gl::FRAGMENT_SHADER,
@@ -268,13 +270,17 @@ impl RenderState {
                 };
                 shaders::Shader::from_file(&self.gl, &format!("./data/shaders/{file}"), shader_type)
                     .unwrap_or_else(|e| {
-                        println!(
-                    "Shader compilation error: could not compile shader '{file}', got errors:\n{e}"
-                );
+                        error!(
+                            "Shader compilation error: could not compile shader '{file}', got errors:\n{e}"
+                        );
                         std::process::exit(1);
                     })
             })
             .collect::<Vec<_>>();
+        trace!(
+            "Calling shader program link function with {} shaders",
+            shaders.len()
+        );
         self.shader_programs.insert(
             shader_name,
             Program::from_shaders(&self.gl, &shaders).unwrap(),
@@ -354,6 +360,7 @@ impl RenderState {
             let mut event_pump = sdl_context.event_pump().unwrap();
             let mouse_util = sdl_context.mouse();
             if let Ok(new_render_state) = render_state_receiver.try_recv() {
+                trace!("Receieved new render state, merging in new changes");
                 self.merge_changes(new_render_state);
             }
 
@@ -367,6 +374,16 @@ impl RenderState {
                         mouse_util.set_relative_mouse_mode(!mouse_util.relative_mouse_mode());
                     }
                     _ => {
+                        let etype = if event.is_keyboard() {
+                            "Keyboard"
+                        } else if event.is_mouse() {
+                            "Mouse"
+                        } else if event.is_window() {
+                            "Window"
+                        } else {
+                            "Other"
+                        };
+                        trace!("Sending {etype} event to update thread");
                         let _ = event_sender.send(GameStateEvent::SDLEvent(event)).unwrap();
                     }
                 }

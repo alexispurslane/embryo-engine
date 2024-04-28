@@ -97,6 +97,7 @@ pub mod config {
 
     pub fn read_config() -> GameConfig {
         let mut contents = String::new();
+        info!("Loading configuration file at ./data/config.toml");
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -104,8 +105,8 @@ pub mod config {
             .open("./data/config.toml")
         {
             file.read_to_string(&mut contents).unwrap();
-            println!("{contents}");
             if contents.len() == 0 {
+                warn!("Configuration file was empty, inserting fresh contents.");
                 contents = r#"
 [performance]
 update_interval = 16
@@ -137,6 +138,9 @@ motion_speed = 10.0
 "#
                 .into();
                 file.write(contents.as_bytes()).unwrap();
+                warn!("de novo configuration file created");
+            } else {
+                debug!("Configuration file contents:\n {contents}");
             }
         }
         let config: GameConfig = toml::from_str(&contents).unwrap();
@@ -151,6 +155,7 @@ motion_speed = 10.0
         {
             panic!("Invalid values in config file.");
         }
+        info!("Successfully read configuration file");
         config
     }
 }

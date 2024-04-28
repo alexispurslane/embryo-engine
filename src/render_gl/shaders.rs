@@ -37,6 +37,7 @@ impl Shader {
             gl.GetShaderiv(id, gl::COMPILE_STATUS, &mut success);
         }
 
+        trace!("Shader compile status: {success}");
         if success == 0 {
             let mut len: gl::types::GLint = 0;
             unsafe {
@@ -118,6 +119,8 @@ impl Program {
         unsafe {
             gl.GetProgramiv(program_id, gl::LINK_STATUS, &mut success);
         }
+
+        trace!("Link status: {success}");
 
         let mut len: gl::types::GLint = 0;
         if success == 0 {

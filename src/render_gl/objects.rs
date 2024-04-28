@@ -318,12 +318,14 @@ impl<T: Sized> Drop for BufferObject<T> {
     }
 }
 
-pub struct VertexArrayObject {
+pub struct VertexArrayObject<'a> {
     gl: Gl,
     pub id: gl::types::GLuint,
+    pub buffers: Vec<Box<dyn Buffer>>,
+    _phantom: PhantomData<&'a ()>,
 }
 
-impl VertexArrayObject {
+impl<'a> VertexArrayObject<'a> {
     pub fn new(gl: &Gl) -> Self {
         let mut vao: gl::types::GLuint = 0;
         unsafe {
@@ -332,7 +334,14 @@ impl VertexArrayObject {
         VertexArrayObject {
             gl: gl.clone(),
             id: vao,
+            buffers: vec![],
+            _phantom: PhantomData,
         }
+    }
+
+    // TODO: eventually use this to eliminate std::mem::forget
+    pub fn attach<T: 'a>(&mut self, bo: BufferObject<T>) {
+        self.buffers.push(Box::new(bo));
     }
 
     pub fn draw_arrays(

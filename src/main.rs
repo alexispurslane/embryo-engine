@@ -18,6 +18,8 @@ extern crate rayon;
 extern crate rmp;
 extern crate sdl2;
 #[macro_use]
+extern crate log;
+#[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 extern crate imgui;
 extern crate imgui_opengl_renderer;
@@ -55,10 +57,53 @@ lazy_static! {
 }
 
 pub fn main() {
+    simplelog::TermLogger::init(
+        log::LevelFilter::Trace,
+        simplelog::Config::default(),
+        simplelog::TerminalMode::Mixed,
+        simplelog::ColorChoice::Always,
+    )
+    .unwrap();
+    info!(
+        r#"
+
+                                 @@@@@@@@@@@
+                              @@    @@@@@    @@
+                           @@@  @@@       @@@  @@@
+                          @@ @@ @       @@@@  @@ @@
+                         @  @   @     @@    @   @  @
+                        @  @  @@     @@      @@  @  @
+                       @@ @  @      @@    @@  @@  @ @@
+                       @  @  @@@@@@ @@         @  @  @
+                       @  @       @@  @@       @  @  @
+                       @  @    @@ @            @  @  @
+                       @@ @   @@   @@@        @@  @ @@
+                        @  @   @             @@  @  @
+                         @  @@  @@         @@   @  @
+                          @@ @@    @@@@@@@    @@ @@
+                           @@@  @@@       @@@  @@@
+                              @@    @@@@@    @@
+                                 @@@@@@@@@@@
+
+
+ _____           _                      _____             _
+| ____|_ __ ___ | |__  _ __ _   _  ___ | ____|_ __   __ _(_)_ __   ___
+|  _| | '_ ` _ \| '_ \| '__| | | |/ _ \|  _| | '_ \ / _` | | '_ \ / _ \
+| |___| | | | | | |_) | |  | |_| | (_) | |___| | | | (_| | | | | |  __/
+|_____|_| |_| |_|_.__/|_|   \__, |\___/|_____|_| |_|\__, |_|_| |_|\___|
+                            |___/                   |___/ v 0.1.0
+
+"#
+    );
+    info!("Beginning initialization process...");
+
     ///////// Initialize SDL2 window
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
+    let _image_context = sdl2::image::init(sdl2::image::InitFlag::all());
+
+    debug!("SDL context created");
 
     let gl_attr = video_subsystem.gl_attr();
     gl_attr.set_double_buffer(true);
@@ -84,9 +129,10 @@ pub fn main() {
 
     sdl_context.mouse().set_relative_mouse_mode(true);
 
+    debug!("SDL window created");
+
     ///////// Initialize OpenGL
 
-    let _image_context = sdl2::image::init(sdl2::image::InitFlag::all());
     let _gl_context = window.gl_create_context().unwrap();
     let gl = gl::Gl::load_with(|s| {
         video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void
@@ -100,6 +146,8 @@ pub fn main() {
         let _ = video_subsystem.gl_set_swap_interval(0);
     }
 
+    debug!("OpenGL context created and configured");
+
     ///////// Initialize imGUI
 
     let mut imgui = imgui::Context::create();
@@ -112,6 +160,10 @@ pub fn main() {
     let mut platform = imgui_sdl2_support::SdlPlatform::init(&mut imgui);
     let renderer = imgui_opengl_renderer::Renderer::new(&mut imgui, &gl);
 
+    debug!("imGUI context, SDL support, and OpenGL renderer initialized ");
+
+    info!("Game window created!");
+
     ///////// Initalize game
 
     let (width, height) = window.size();
@@ -120,8 +172,16 @@ pub fn main() {
     let mut render_state = RenderState::new(&gl, width, height);
     let resource_manager = ResourceManager::new();
 
+    debug!("Initial game state created");
+
     render_state.load_shaders();
+
+    debug!("Shaders loaded");
+
     let new_entities = systems::load_entities(&mut game_state);
+
+    debug!("Game world entities constructed");
+
     systems::unload_entity_models(
         &mut game_state,
         &mut render_state,
@@ -129,6 +189,10 @@ pub fn main() {
         &new_entities,
     );
     systems::load_entity_models(&mut game_state, &resource_manager, &new_entities);
+
+    debug!("3d model loading initiated");
+
+    info!("Initial game state loaded");
 
     ///////// Game loop
 
@@ -152,6 +216,8 @@ pub fn main() {
         running.clone(),
     );
 
+    info!("Update thread started");
+
     ////// Render thread
     render_state.render_loop(
         &resource_manager,
@@ -164,5 +230,7 @@ pub fn main() {
         &renderer,
         &window,
         running,
-    )
+    );
+
+    info!("Render thread started");
 }

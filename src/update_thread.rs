@@ -197,6 +197,7 @@ pub fn spawn_update_loop(
     let running = running.clone();
     let interval = CONFIG.performance.update_interval as f32;
     std::thread::spawn(move || {
+        debug!("Spawned update thread");
         let res = core_affinity::set_for_current(core_ids[0]);
         if res {
             let time = std::time::Instant::now();
@@ -219,6 +220,7 @@ pub fn spawn_update_loop(
                 }
 
                 if total_lag > interval {
+                    trace!("Digesting events from window/render thread");
                     // Catch up with events
                     while let Some(event) = event_receiver.try_iter().next() {
                         if let GameStateEvent::SDLEvent(sdl2::event::Event::Quit { timestamp }) =
@@ -231,8 +233,10 @@ pub fn spawn_update_loop(
                     }
 
                     if game_state.changed_diff.any_changed() {
+                        trace!("Game state changed");
                         let cam = {
                             if game_state.changed_diff.camera_changed {
+                                trace!("Camera state has changed");
                                 let camera = game_state.camera.expect("Must have camera");
                                 let cc = game_state
                                     .entities
@@ -255,6 +259,7 @@ pub fn spawn_update_loop(
                         };
                         let matrices = {
                             if game_state.changed_diff.entities_changed {
+                                trace!("Entity transforms have changed");
                                 // We DON'T use the entities_mut() command here
                                 // because if we did, it would lead to a degenerate
                                 // loop of stuff being marked changed every frame
@@ -275,6 +280,7 @@ pub fn spawn_update_loop(
                         };
                         let lights = {
                             if game_state.changed_diff.lights_changed {
+                                trace!("Light list has changed");
                                 Some(
                                     game_state
                                         .lights
@@ -296,6 +302,7 @@ pub fn spawn_update_loop(
                                 None
                             }
                         };
+                        trace!("Sending new state to render thread");
                         let _ = render_state_sender.send(RenderStateEvent {
                             camera: cam,
                             entity_generations: Some(
@@ -308,6 +315,7 @@ pub fn spawn_update_loop(
                     if CONFIG.performance.cap_update_fps {
                         let sleep_time = interval - dt;
                         if sleep_time > 0.0 {
+                            trace!("last frame took less than update interval ({interval} - {dt} = {sleep_time}), sleeping to make up for it.");
                             std::thread::sleep(Duration::from_millis(sleep_time as u64));
                         }
                     }
