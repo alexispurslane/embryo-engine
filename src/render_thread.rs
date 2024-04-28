@@ -359,9 +359,20 @@ impl RenderState {
 
             let mut event_pump = sdl_context.event_pump().unwrap();
             let mouse_util = sdl_context.mouse();
-            if let Ok(new_render_state) = render_state_receiver.try_recv() {
+
+            // What I really wanted is a version of channel that just doesn't
+            // have queue at all --- when a new message is sent, it is copied
+            // over to replace the old one in a single atomic operation.
+            // Basically like a multithreading-safe double buffer. Unfortunately
+            // the existing double buffer implementations weren't designed to be
+            // used across threads, so I'll have to come back to this.
+            let mut new_render_state = None;
+            while let Ok(n) = render_state_receiver.try_recv() {
                 trace!("Receieved new render state, merging in new changes");
-                self.merge_changes(new_render_state);
+                new_render_state = Some(n);
+            }
+            if let Some(nrs) = new_render_state {
+                self.merge_changes(nrs);
             }
 
             for event in event_pump.poll_iter() {
