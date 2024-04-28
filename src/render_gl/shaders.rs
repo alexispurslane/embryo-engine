@@ -60,7 +60,7 @@ impl Shader {
 
     pub fn from_file(
         gl: &Gl,
-        path: &'static str,
+        path: &str,
         shader_type: gl::types::GLuint,
     ) -> Result<Shader, String> {
         let contents = std::fs::read_to_string(path)

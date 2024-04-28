@@ -20,6 +20,7 @@ fxaa = true
 fullscreen_mode = "Windowed"
 window_width = 1920
 window_height = 1080
+attenuation_cutoff = 51.2
 
 [controls]
 mouse_sensitivity = 1.0

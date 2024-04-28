@@ -72,9 +72,9 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
                 color: colors[trng.gen_range(0..colors.len())],
                 ambient: glam::vec3(0.0, 0.0, 0.0),
                 attenuation: Attenuation {
-                    constant: 1.0,
-                    linear: 0.7,
-                    quadratic: 0.3,
+                    constant: 1.5,
+                    linear: 9.0,
+                    quadratic: 1.9,
                 },
             },
         );
@@ -83,7 +83,7 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
 
     let data = ["./data/models/heroine.glb"];
     let mut entities = vec![];
-    for i in 0..10000 {
+    for i in 0..1000 {
         let thing = scene.entities_mut().gen_entity();
         scene.entities_mut().add_component(
             thing,

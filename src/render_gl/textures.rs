@@ -14,6 +14,7 @@ use std::{any::Any, marker::PhantomData};
 
 use super::objects::FramebufferAttachment;
 
+#[derive(Clone)]
 pub struct TextureParameters {
     pub texture_type: gl::types::GLenum,
     pub color_attachment_point: Option<gl::types::GLenum>,
@@ -71,7 +72,7 @@ impl ColorDepth for R16F {
     }
 }
 
-pub type RGBA32F = f32;
+pub struct RGBA32F(f32);
 impl ColorDepth for RGBA32F {
     fn get_gl_type() -> gl::types::GLenum {
         gl::FLOAT
@@ -84,7 +85,7 @@ impl ColorDepth for RGBA32F {
     }
 }
 
-pub type RGBA16F = f16;
+pub struct RGBA16F(f16);
 impl ColorDepth for RGBA16F {
     fn get_gl_type() -> gl::types::GLenum {
         gl::HALF_FLOAT
@@ -96,7 +97,7 @@ impl ColorDepth for RGBA16F {
         gl::RGBA16F
     }
 }
-pub type DepthComponent24 = u32;
+pub struct DepthComponent24(u32);
 impl ColorDepth for DepthComponent24 {
     fn get_gl_type() -> gl::types::GLenum {
         gl::UNSIGNED_INT
@@ -109,11 +110,26 @@ impl ColorDepth for DepthComponent24 {
     }
 }
 
+#[derive(Clone)]
+pub struct Depth24Stencil8(u32);
+impl ColorDepth for Depth24Stencil8 {
+    fn get_gl_type() -> gl::types::GLenum {
+        gl::UNSIGNED_INT_24_8
+    }
+    fn get_pixel_format() -> gl::types::GLenum {
+        gl::DEPTH_STENCIL
+    }
+    fn get_sized_internal_format() -> gl::types::GLenum {
+        gl::DEPTH24_STENCIL8
+    }
+}
+
 pub trait AbstractTexture {
     fn bind(&self, tex_unit: usize);
     fn unbind(&self, tex_unit: usize);
 }
 
+#[derive(Clone)]
 pub struct Texture<T: ColorDepth> {
     gl: Gl,
     pub id: gl::types::GLuint,

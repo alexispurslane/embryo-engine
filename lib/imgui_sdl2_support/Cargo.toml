@@ -12,4 +12,4 @@ categories = ["gui"]
 
 [dependencies]
 imgui = "0.11.0"
-sdl2 = "0.35"
+sdl2 = "0.36"

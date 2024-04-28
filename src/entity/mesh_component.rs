@@ -90,9 +90,9 @@ impl Material {
             Texture(tex) => {
                 let texture = &model.textures.as_ref().expect("Cannot activate a material in the shader if that material and associated model have not had their OpenGL things set up.")[*tex];
                 texture.bind(texture_bind);
-                shader_program.set_uniform_1ui(
+                shader_program.set_uniform_1i(
                     &CString::new(format!("{}Texture", uniform_name)).unwrap(),
-                    texture_bind as u32,
+                    texture_bind as i32,
                 );
                 shader_program.set_uniform_1b(
                     &CString::new(format!("{}IsTexture", uniform_name)).unwrap(),
@@ -586,15 +586,12 @@ impl Model {
         if !thread::current().name().is_some_and(|x| x.contains("main")) {
             panic!("Called OpenGL setup function on model while not on main thread: this is undefined behavior!");
         }
-        self.ibo = Some({
-            let mut ibo = BufferObject::<InstanceTransformVertex>::new(
-                gl,
-                gl::ARRAY_BUFFER,
-                gl::STREAM_DRAW,
-                (CONFIG.performance.max_batch_size * 3) as usize,
-            );
-            ibo
-        });
+        self.ibo = Some(BufferObject::<InstanceTransformVertex>::new(
+            gl,
+            gl::ARRAY_BUFFER,
+            gl::STREAM_DRAW,
+            (CONFIG.performance.max_batch_size * 3) as usize,
+        ));
         self.textures = Some(
             self.textures_raw
                 .iter()

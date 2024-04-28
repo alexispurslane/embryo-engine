@@ -35,72 +35,6 @@ pub fn create_whitespace_cstring(len: usize) -> CString {
     unsafe { CString::from_vec_unchecked(buffer) }
 }
 
-pub fn clear_screen(gl: &Gl) {
-    unsafe {
-        gl.Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-    }
-}
-
-pub fn setup_viewport(gl: &Gl, (w, h): (u32, u32)) {
-    unsafe {
-        gl.Viewport(0, 0, w as gl::types::GLint, h as gl::types::GLint);
-        gl.ClearColor(0.0, 0.0, 0.0, 1.0);
-        gl.Enable(gl::DEPTH_TEST);
-        gl.Enable(gl::CULL_FACE);
-        #[cfg(debug_assertions)]
-        gl.Enable(gl::DEBUG_OUTPUT);
-    }
-}
-
-pub fn camera_prepare_shader(program: &Program, camera: &RenderCameraState) {
-    program.set_uniform_matrix_4fv(
-        &CString::new("view_matrix").unwrap(),
-        &camera.view.to_cols_array(),
-    );
-    program.set_uniform_matrix_4fv(
-        &CString::new("projection_matrix").unwrap(),
-        &camera.proj.to_cols_array(),
-    );
-}
-
-pub fn lights_prepare_shader(
-    gl: &Gl,
-    program: &Program,
-    lights_ubo: &mut BufferObject<ShaderLight>,
-    camera: &RenderCameraState,
-    lights: &[ShaderLight],
-    round_robin_buffer: usize,
-) {
-    lights_ubo.write_to_persistant_map(round_robin_buffer * CONFIG.performance.max_lights, lights);
-    lights_ubo.bind();
-    unsafe {
-        gl.BindBufferRange(
-            gl::UNIFORM_BUFFER,
-            0,
-            lights_ubo.id,
-            (round_robin_buffer
-                * CONFIG.performance.max_lights
-                * std::mem::size_of::<ShaderLight>()) as gl::types::GLintptr,
-            (CONFIG.performance.max_lights * std::mem::size_of::<ShaderLight>())
-                as gl::types::GLsizeiptr,
-        );
-    }
-    program.set_uniform_3f(
-        &CString::new("cameraDirection").unwrap(),
-        (camera.view * glam::Vec4::Z).xyz().to_array().into(),
-    );
-}
-
-pub fn shader_set_lightmask(program: &Program, lightmask: u32) {
-    // If it is 32, then we physically *couldn't* pass in a value that was too large!
-    if CONFIG.performance.max_lights < 32
-        && lightmask > 2_u32.pow(CONFIG.performance.max_lights as u32) - 1
-    {
-        panic!("Cannot enable that many lights!");
-    }
-    program.set_uniform_1ui(&CString::new("lightmask").unwrap(), lightmask);
-}
-
 #[macro_export]
 macro_rules! zip {
     ($x: expr) => ($x);
@@ -151,6 +85,7 @@ pub mod config {
         pub fxaa: bool,
         pub window_width: usize,
         pub window_height: usize,
+        pub attenuation_cutoff: f32,
     }
 
     #[derive(Deserialize)]
@@ -194,6 +129,7 @@ fxaa = true
 fullscreen_mode = "WindowedFullscreen"
 window_width = 1920
 window_height = 1080
+attenuation_cutoff = 51.2
 
 [controls]
 mouse_sensitivity = 1.0
@@ -496,20 +432,95 @@ pub mod primitives {
         lazy_static,
         render_gl::data::{VertexPos, VertexTex},
     };
+    #[rustfmt::skip]
     lazy_static! {
+        pub static ref CUBE: Vec<VertexPos> = vec![
+            VertexPos { pos: [-1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [-1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [-1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [-1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [-1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [-1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [-1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [-1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [-1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [-1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [-1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [-1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [-1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [-1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [1.0,-1.0,-1.0].into() },
+            VertexPos { pos: [1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [1.0,-1.0, 1.0].into() },
+            VertexPos { pos: [1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [-1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [-1.0, 1.0,-1.0].into() },
+            VertexPos { pos: [-1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [-1.0, 1.0, 1.0].into() },
+            VertexPos { pos: [1.0,-1.0, 1.0].into() }
+        ];
+        pub static ref SPHERE: Vec<VertexPos> = vec![
+            VertexPos { pos: [0.0, 0.0, -1.0].into() },
+            VertexPos { pos: [0.7236073017120361, -0.5257253050804138, -0.44721952080726624].into() },
+            VertexPos { pos: [-0.276388019323349, -0.8506492376327515, -0.4472198486328125].into() },
+            VertexPos { pos: [-0.8944262266159058, 0.0, -0.44721561670303345].into() },
+            VertexPos { pos: [-0.276388019323349, 0.8506492376327515, -0.4472198486328125].into() },
+            VertexPos { pos: [0.7236073017120361, 0.5257253050804138, -0.44721952080726624].into() },
+            VertexPos { pos: [0.276388019323349, -0.8506492376327515, 0.4472198486328125].into() },
+            VertexPos { pos: [-0.7236073017120361, -0.5257253050804138, 0.44721952080726624].into() },
+            VertexPos { pos: [-0.7236073017120361, 0.5257253050804138, 0.44721952080726624].into() },
+            VertexPos { pos: [0.276388019323349, 0.8506492376327515, 0.4472198486328125].into() },
+            VertexPos { pos: [0.8944262266159058, 0.0, 0.44721561670303345].into() },
+            VertexPos { pos: [0.0, 0.0, 1.0].into() },
+            VertexPos { pos: [-0.16245555877685547, -0.49999526143074036, -0.8506544232368469].into() },
+            VertexPos { pos: [0.42532268166542053, -0.30901139974594116, -0.8506541848182678].into() },
+            VertexPos { pos: [0.26286882162094116, -0.8090116381645203, -0.5257376432418823].into() },
+            VertexPos { pos: [0.8506478667259216, 0.0, -0.5257359147071838].into() },
+            VertexPos { pos: [0.42532268166542053, 0.30901139974594116, -0.8506541848182678].into() },
+            VertexPos { pos: [-0.525729775428772, 0.0, -0.8506516814231873].into() },
+            VertexPos { pos: [-0.6881893873214722, -0.49999693036079407, -0.5257362127304077].into() },
+            VertexPos { pos: [-0.16245555877685547, 0.49999526143074036, -0.8506544232368469].into() },
+            VertexPos { pos: [-0.6881893873214722, 0.49999693036079407, -0.5257362127304077].into() },
+            VertexPos { pos: [0.26286882162094116, 0.8090116381645203, -0.5257376432418823].into() },
+            VertexPos { pos: [0.9510578513145447, -0.30901262164115906, 0.0].into() },
+            VertexPos { pos: [0.9510578513145447, 0.30901262164115906, 0.0].into() },
+            VertexPos { pos: [0.0, -0.9999999403953552, 0.0].into() },
+            VertexPos { pos: [0.5877856016159058, -0.8090167045593262, 0.0].into() },
+            VertexPos { pos: [-0.9510578513145447, -0.30901262164115906, 0.0].into() },
+            VertexPos { pos: [-0.5877856016159058, -0.8090167045593262, 0.0].into() },
+            VertexPos { pos: [-0.5877856016159058, 0.8090167045593262, 0.0].into() },
+            VertexPos { pos: [-0.9510578513145447, 0.30901262164115906, 0.0].into() },
+            VertexPos { pos: [0.5877856016159058, 0.8090167045593262, 0.0].into() },
+            VertexPos { pos: [0.0, 0.9999999403953552, 0.0].into() },
+            VertexPos { pos: [0.6881893873214722, -0.49999693036079407, 0.5257362127304077].into() },
+            VertexPos { pos: [-0.26286882162094116, -0.8090116381645203, 0.5257376432418823].into() },
+            VertexPos { pos: [-0.8506478667259216, 0.0, 0.5257359147071838].into() },
+            VertexPos { pos: [-0.26286882162094116, 0.8090116381645203, 0.5257376432418823].into() },
+            VertexPos { pos: [0.6881893873214722, 0.49999693036079407, 0.5257362127304077].into() },
+            VertexPos { pos: [0.16245555877685547, -0.49999526143074036, 0.8506543636322021].into() },
+            VertexPos { pos: [0.525729775428772, 0.0, 0.8506516814231873].into() },
+            VertexPos { pos: [-0.42532268166542053, -0.30901139974594116, 0.8506541848182678].into() },
+            VertexPos { pos: [-0.42532268166542053, 0.30901139974594116, 0.8506541848182678].into() },
+            VertexPos { pos: [0.16245555877685547, 0.49999526143074036, 0.8506543636322021].into() },
+        ];
         pub static ref QUAD: Vec<VertexPos> = vec![
-            VertexPos {
-                pos: [-1.0, 1.0, 0.0].into(),
-            },
-            VertexPos {
-                pos: [-1.0, -1.0, 0.0].into(),
-            },
-            VertexPos {
-                pos: [1.0, 1.0, 0.0].into(),
-            },
-            VertexPos {
-                pos: [1.0, -1.0, 0.0].into(),
-            },
+            VertexPos {pos: [-1.0, 1.0, 0.0].into(),},
+            VertexPos {pos: [-1.0, -1.0, 0.0].into(),},
+            VertexPos {pos: [1.0, 1.0, 0.0].into(),},
+            VertexPos {pos: [1.0, -1.0, 0.0].into(),},
         ];
     }
 }

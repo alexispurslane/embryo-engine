@@ -7,6 +7,7 @@
  */
 
 use std::{
+    fmt::Debug,
     sync::{
         atomic::AtomicBool,
         mpsc::{Receiver, Sender},
