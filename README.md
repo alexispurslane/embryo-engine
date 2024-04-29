@@ -55,8 +55,7 @@ Since the technical challenges of both genres overlap substantially, the Embryo 
 - 🔀 **Maximize parallelism and minimize overhead**: despite the old warning against premature optimization, in order to make my engine as scriptable as possible, it needs the core engine to be low-overhead and fast, to leave as much frame time for scripting as possible; likewise, to maximize its ability to allow possibly computationally intensive simulation behavior, the core engine needs to be well-optimized. Therefore, a lot of design effort, thinking, and research has gone into choosing the best algorithms, data structures, and general engine architecture to make this engine as performant as possible *for its specific use-case in immersive sims and open world RPGs*. This includes making the engine as parallel as possible without making it an infeasible task, utilizing insights from AAA game engine development.
 
 For a more in-depth dive into the design choices for this engine
-and the reasoning behind them, check out [my general design
-document](./DESIGN.md). Although most of my design notes are in
+and the reasoning behind them, check out [the high-level overview on the wiki](https://github.com/alexispurslane/embryo-engine/wiki). Although most of my design notes are in
 my physical notebook or in my head (which is why I won't be
 accepting contributions or pull requests until at least the basic
 architecture of the engine is completed), I thought it might be
