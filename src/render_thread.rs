@@ -290,11 +290,11 @@ impl RendererState {
 
     pub fn load_shaders(&mut self) {
         self.shader(DEFAULT_SHADER, &["camera.vert", "material.frag"]);
-        self.shader(LIGHT_SHADER, &["light_camera.vert", "light.frag"]);
         self.shader(SIMPLE_PROJECT_SHADER, &["light_camera.vert"]);
         self.shader(TONEMAP_SHADER, &["passthrough.vert", "hdr.frag"]);
         self.shader(LUMINANCE_SHADER, &["luminance.comp"]);
         self.shader(LUMINANCE_SHADER2, &["average.comp"]);
+        self.shader(LIGHT_SHADER, &["light_camera.vert", "light.frag"]);
     }
 
     pub fn merge_changes(&mut self, new_render_state: RenderWorldState) {
@@ -423,8 +423,11 @@ impl RendererState {
         }
     }
 
+    /// Render all the models in the world to the G-buffer. This just composits
+    /// together all the info the next step needs to actually render a frame.
     pub fn render_to_g(&mut self) {
         if let Some(camera) = self.camera.as_ref() {
+            // Set up G-buffer for world mesh drawing
             self.g_buffer.bind_to(gl::DRAW_FRAMEBUFFER);
             self.g_buffer.draw_to_buffers(&[
                 gl::COLOR_ATTACHMENT0,
@@ -441,6 +444,7 @@ impl RendererState {
             }
             clear_screen(&self.gl);
 
+            // Use the default shader
             let program = &self.shader_programs[&DEFAULT_SHADER];
             program.set_used();
 
@@ -475,7 +479,9 @@ impl RendererState {
                     let batch_start = batch as usize * mbs;
                     // And goes until max batch size, or until the end of the list of transforms.
                     let batch_size = mbs.min(new_transforms.len() - batch_start) as usize;
-                    // We call recreate with data here instead of just modifying the
+                    // Send batch of transforms to the model's instance buffer
+                    //
+                    // NOTE: We call recreate with data here instead of just modifying the
                     // existing buffer, so that a new buffer will be created and
                     // attached to contain this data and be referenced by the new draw
                     // calls, and the old buffer can stick around to be referenced by
@@ -501,6 +507,8 @@ impl RendererState {
                         gl::STREAM_DRAW,
                     );
 
+                    // Render each mesh (primitive) in the model using that
+                    // instance buffer, so they all get rendered together
                     for mesh in &model.meshes {
                         for mesh in &mesh.primitives {
                             let mesh_gl = mesh.gl_mesh.as_ref().expect(
@@ -525,6 +533,7 @@ impl RendererState {
                 }
             }
         }
+        // Unset some of the things we won't need later
         unsafe {
             self.gl.DepthMask(gl::FALSE);
             self.gl.Disable(gl::DEPTH_TEST);
@@ -532,36 +541,30 @@ impl RendererState {
         self.g_buffer.unbind();
     }
 
+    /// Render the light volumes onto the HDR buffer using the G-buffer to
+    /// determine what the light should actually illuminate. This produces the
+    /// actual frame.
     pub fn render_g_to_hdr(&mut self) {
         if let Some(camera) = self.camera.as_ref() {
             self.hdr_framebuffer.bind_to(gl::DRAW_FRAMEBUFFER);
+            // We don't want to clear the depth buffer because this framebuffer
+            // and the g buffer share a depth buffer so that we can use the
+            // depth information from the previous step automatically, and we'll
+            // be using that information throughout this whole step.
             unsafe {
                 self.gl.Clear(gl::COLOR_BUFFER_BIT);
             }
 
             setup_viewport(&self.gl, self.viewport_size);
 
+            // We have to render each light individually because we need to be
+            // able to set a different shader subroutine for each light type to
+            // render the light, and we don't have the lights grouped by type,
+            // so we can't use instancing. TODO: Actually group lights by type
+            // so we can use instancing on lights too
             for light in self.lights.iter() {
-                let light_model_matrix = {
-                    let brightest_color = [light.color.d0, light.color.d1, light.color.d2]
-                        .into_iter()
-                        .max_by(|a, b| a.partial_cmp(b).unwrap())
-                        .unwrap_or(0.0);
-
-                    let radius = (-light.linear_attenuation
-                        + (light.linear_attenuation.powi(2)
-                            - 4.0
-                                * light.quadratic_attenuation
-                                * (light.constant_attenuation
-                                    - brightest_color * CONFIG.graphics.attenuation_cutoff))
-                            .sqrt())
-                        / (2.0 * light.quadratic_attenuation);
-                    glam::Mat4::from_scale_rotation_translation(
-                        glam::vec3(radius, radius, radius),
-                        glam::Quat::IDENTITY,
-                        glam::vec3(light.position.d0, light.position.d1, light.position.d2),
-                    )
-                };
+                // This information is shared between the stencil and drawing phases
+                let light_model_matrix = light.light_volume_model_matrix();
 
                 let program = &self.shader_programs[&SIMPLE_PROJECT_SHADER];
                 program.set_used();
@@ -572,23 +575,55 @@ impl RendererState {
                     &light_model_matrix.to_cols_array(),
                 );
 
-                // Set up stencil buffer for this light so we don't overdraw
+                // 1. Prepare light stencil buffer
+                //
+                // Set up stencil buffer for this light so we don't have the
+                // light draw things that are in front of or behind its bounding
+                // volume as if they are effected by it.
                 self.g_buffer.bind_to(gl::DRAW_FRAMEBUFFER);
                 unsafe {
                     self.gl.Enable(gl::STENCIL_TEST);
                     self.gl.DrawBuffer(gl::NONE);
+                    // We're testing fragment position in space relative to the
+                    // camera, so we need depth
                     self.gl.Enable(gl::DEPTH_TEST);
+                    // We need to test both the front and back faces of the
+                    // light's bounding volume against the depth, so render both
+                    // for testing
                     self.gl.Disable(gl::CULL_FACE);
                     self.gl.Clear(gl::STENCIL_BUFFER_BIT);
 
+                    // Don't apply the stencil buffer to our own drawing in the stencil buffer
                     self.gl.StencilFunc(gl::ALWAYS, 0, 0);
 
+                    // If you look at (*), you'll see we'll only be drawing the
+                    // light where the stencil buffer is not zero. So:
+
+                    // If the back face bounding volume fragment to be drawn is
+                    // behind the object (fails the depth test), increment the
+                    // stencil buffer in that area by one, meaning only draw the
+                    // light in areas where the object in that area is in front
+                    // of the back of the light's bounding volume. However, this
+                    // leaves things too close to the camera being effected.
+                    // Hence, the next step...
                     self.gl
                         .StencilOpSeparate(gl::BACK, gl::KEEP, gl::INCR_WRAP, gl::KEEP);
+                    // Once all the back faces are drawn, for all the front
+                    // faces, if that fragment in the front face is behind the
+                    // object, decrement the buffer again. For things that were
+                    // already past the back side of the volume, this will
+                    // return them to zero, excluding things that were past the
+                    // back of the volume but are *also* past the front (and
+                    // thus not within the light's bounding volume). For things
+                    // inside, e.g. against which the back side test fails, but
+                    // the front side test succeeds, they are left at one, and
+                    // thus, can be drawn.
                     self.gl
                         .StencilOpSeparate(gl::FRONT, gl::KEEP, gl::DECR_WRAP, gl::KEEP);
                 }
 
+                // Draw the front and back sides of the bounding volume into the
+                // stencil buffer according to the rules above.
                 self.light_sphere_vao.bind();
                 self.light_sphere_vao.draw_arrays_instanced(
                     gl::TRIANGLES,
@@ -598,8 +633,11 @@ impl RendererState {
                 );
                 self.light_sphere_vao.unbind();
 
-                // Draw light bounding volumes
+                // 2. Draw light bounding volume
                 //
+                // Draw the light using the information it covers in the
+                // G-buffer to draw the places the light illuminates as effected
+                // by the light, and nothing else.
                 self.hdr_framebuffer.bind_to(gl::DRAW_FRAMEBUFFER);
 
                 let program = &self.shader_programs[&LIGHT_SHADER];
@@ -617,15 +655,27 @@ impl RendererState {
                 );
 
                 unsafe {
+                    // Actually apply stenciling
                     self.gl.Enable(gl::STENCIL_TEST);
-                    self.gl.StencilFunc(gl::NOTEQUAL, 0, 0xFF);
-                    self.gl.Disable(gl::DEPTH_TEST);
+
+                    // Only draw a fragment for this light if the stencil buffer at that fragment is zero
+                    self.gl.StencilFunc(gl::NOTEQUAL, 0, 0xFF); // (*)
+
+                    // Only draw the back faces of light bounding volumes, so
+                    // the light isn't drawn twice, and is visible while you're
+                    // inside it.
+                    self.gl.CullFace(gl::FRONT);
+
+                    // Light is additive.
                     self.gl.Enable(gl::BLEND);
                     self.gl.BlendEquation(gl::FUNC_ADD);
                     self.gl.BlendFunc(gl::ONE, gl::ONE);
-                    self.gl.Enable(gl::CULL_FACE);
-                    self.gl.CullFace(gl::FRONT);
 
+                    // Fix other settings
+                    self.gl.Disable(gl::DEPTH_TEST);
+                    self.gl.Enable(gl::CULL_FACE);
+
+                    // Bind each of the G-buffer layers to its respective binding point in the shader
                     for i in 0..=3 {
                         self.gl.BindImageTexture(
                             i,
@@ -640,12 +690,14 @@ impl RendererState {
                         );
                     }
 
+                    // Send the light struct using a UBO to the shader
                     self.light_ubo
                         .recreate_with_data(std::slice::from_ref(light), gl::STREAM_DRAW);
                     self.gl
                         .BindBufferBase(gl::UNIFORM_BUFFER, 4, self.light_ubo.id)
                 }
 
+                // Select the appropriate shader subroutine for this light
                 unsafe {
                     self.gl.UniformSubroutinesuiv(
                         gl::FRAGMENT_SHADER,
@@ -654,6 +706,7 @@ impl RendererState {
                     );
                 }
 
+                // Render the light!
                 self.light_sphere_vao.bind();
                 self.light_sphere_vao.draw_arrays_instanced(
                     gl::TRIANGLES,
@@ -663,6 +716,7 @@ impl RendererState {
                 );
                 self.light_sphere_vao.unbind();
 
+                // Prepare for the next iteration
                 unsafe {
                     self.gl.CullFace(gl::BACK);
                     self.gl.Disable(gl::BLEND);
@@ -676,17 +730,25 @@ impl RendererState {
         }
     }
 
+    /// Renders the HDR buffer to the standard definition window framebuffer
+    /// using tonemapping supplied by the tone mapping shader
     pub fn render_hdr_to_sdr(&mut self, avg_dt: f32, lag: f32) {
         setup_viewport(&self.gl, self.viewport_size);
         clear_screen(&self.gl);
 
+        // We'll be using the HDR image as an input in several places here, so
+        // grab it preemptively
         let hdr_image = self
             .hdr_framebuffer
             .get_attachment_mut::<Texture<RGBA16F>>(0);
+
         let min_log_luminance = -8.0f32;
         let max_log_luminance = 3.5f32;
         let tau = 1.1f32;
         let time_coefficient = (1.0 - (-(1000.0 / avg_dt) * tau).exp()).clamp(0.0, 1.0);
+
+        // First, we need to get the average luminance of the HDR buffer.
+        // We'll use two compute shaders for that
         unsafe {
             self.shader_programs[&LUMINANCE_SHADER].set_used();
 
@@ -757,11 +819,10 @@ impl RendererState {
             );
             self.gl
                 .BindImageTexture(1, hdr_image.id, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA16F);
-
-            self.sdr_vao.bind();
-            self.sdr_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
-            self.sdr_vao.unbind();
         }
+        self.sdr_vao.bind();
+        self.sdr_vao.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+        self.sdr_vao.unbind();
     }
 }
 
@@ -780,6 +841,29 @@ pub struct ShaderLight {
     pub exponent: f32,
     padding1: f32,
     padding2: f32,
+}
+
+impl ShaderLight {
+    fn light_volume_model_matrix(&self) -> glam::Mat4 {
+        let brightest_color = [self.color.d0, self.color.d1, self.color.d2]
+            .into_iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+
+        let radius = (-self.linear_attenuation
+            + (self.linear_attenuation.powi(2)
+                - 4.0
+                    * self.quadratic_attenuation
+                    * (self.constant_attenuation
+                        - brightest_color * CONFIG.graphics.attenuation_cutoff))
+                .sqrt())
+            / (2.0 * self.quadratic_attenuation);
+        glam::Mat4::from_scale_rotation_translation(
+            glam::vec3(radius, radius, radius),
+            glam::Quat::IDENTITY,
+            glam::vec3(self.position.d0, self.position.d1, self.position.d2),
+        )
+    }
 }
 
 pub fn light_component_to_shader_light(

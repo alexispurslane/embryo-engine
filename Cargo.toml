@@ -36,3 +36,6 @@ features = ["image", "mixer", "use-pkgconfig", "static-link"]
 [dependencies.gltf]
 version = "1.3.0"
 features = ["extras", "names", "utils", "import"]
+
+[features]
+gl_debug = ["gl/debug"]
