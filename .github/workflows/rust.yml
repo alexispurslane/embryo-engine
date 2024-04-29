@@ -14,13 +14,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: libsdl-org/setup-sdl@main
-        id: sdl
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
         with:
-          install-linux-dependencies: true
-          version: 2-latest
-          version-sdl-image: 2-latest
-          version-sdl-mixer: 2-latest
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: true
+      - name: Install build dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libsdl2-dev libsd2-image-dev libsdl2-mixer-dev liblerc-dev libjbig-dev
+          version: 1.0
       - uses: actions/checkout@v4
       - name: Build
         run: cargo build --verbose
