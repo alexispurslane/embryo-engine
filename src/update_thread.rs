@@ -17,12 +17,13 @@ use std::{
 };
 
 use crate::{
+    dead_drop::DeadDrop,
     entity::{
         camera_component::CameraComponent, light_component::LightComponent,
         transform_component::TransformComponent,
     },
     events,
-    render_thread::{light_component_to_shader_light, RenderCameraState, RenderStateEvent},
+    render_thread::{light_component_to_shader_light, RenderCameraState, RenderWorldState},
     resource_manager::ResourceManager,
     systems, CONFIG,
 };
@@ -185,7 +186,7 @@ impl GameState {
 pub fn spawn_update_loop(
     mut game_state: GameState,
     resource_manager: &ResourceManager,
-    render_state_sender: Sender<RenderStateEvent>,
+    render_state_dead_drop: DeadDrop<RenderWorldState>,
     event_receiver: Receiver<GameStateEvent>,
 
     window: &sdl2::video::Window,
@@ -303,7 +304,7 @@ pub fn spawn_update_loop(
                             }
                         };
                         trace!("Sending new state to render thread");
-                        let _ = render_state_sender.send(RenderStateEvent {
+                        render_state_dead_drop.send(RenderWorldState {
                             camera: cam,
                             entity_generations: Some(
                                 game_state.entities.current_entity_generations.clone(),

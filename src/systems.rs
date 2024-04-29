@@ -111,7 +111,7 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
 
 pub fn unload_entity_models(
     scene: &mut GameState,
-    render: &mut RenderState,
+    render: &mut RendererState,
     resource_manager: &ResourceManager,
     new_entities: &Vec<Entity>,
 ) {
@@ -155,7 +155,7 @@ pub fn load_entity_models(
 pub fn integrate_loaded_models(
     gl: &Gl,
     resource_manager: &ResourceManager,
-    render: &mut RenderState,
+    render: &mut RendererState,
 ) {
     resource_manager.try_integrate_loaded_models(&mut render.models, gl);
 }

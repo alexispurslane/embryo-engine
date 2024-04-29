@@ -1,4 +1,5 @@
 use crate::{
+    dead_drop::DeadDrop,
     entity::{
         light_component::LightComponent, mesh_component::Model,
         transform_component::TransformComponent, Entity, EntityID,
@@ -27,7 +28,7 @@ use std::{
     sync::{
         atomic::AtomicBool,
         mpsc::{Receiver, Sender},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -36,7 +37,7 @@ use gl::Gl;
 use glam::Vec4Swizzles;
 use sdl2::event::Event;
 
-pub struct RenderStateEvent {
+pub struct RenderWorldState {
     pub camera: Option<RenderCameraState>,
     pub entity_generations: Option<HashMap<EntityID, usize>>,
     pub entity_transforms: Option<Box<Vec<Option<glam::Mat4>>>>,
@@ -60,7 +61,7 @@ const DOF_SHADER: usize = 8;
 const LIGHT_SHADER: usize = 9;
 const SIMPLE_PROJECT_SHADER: usize = 10;
 
-pub struct RenderState {
+pub struct RendererState {
     gl: Gl,
 
     pub viewport_size: (u32, u32),
@@ -88,7 +89,7 @@ pub struct RenderState {
     pub sdr_vao: VertexArrayObject,
 }
 
-impl RenderState {
+impl RendererState {
     pub fn new(gl: &Gl, width: u32, height: u32) -> Self {
         let depthstencil = Texture::<Depth24Stencil8>::new_allocated(
             &gl,
@@ -101,7 +102,7 @@ impl RenderState {
             height as usize,
             1,
         );
-        RenderState {
+        RendererState {
             gl: gl.clone(),
             viewport_size: (width, height),
             camera: None,
@@ -296,7 +297,7 @@ impl RenderState {
         self.shader(LUMINANCE_SHADER2, &["average.comp"]);
     }
 
-    pub fn merge_changes(&mut self, new_render_state: RenderStateEvent) {
+    pub fn merge_changes(&mut self, new_render_state: RenderWorldState) {
         if let Some(new_cam) = new_render_state.camera {
             self.camera = Some(new_cam);
         }
@@ -331,7 +332,7 @@ impl RenderState {
         &mut self,
         resource_manager: &ResourceManager,
 
-        render_state_receiver: Receiver<RenderStateEvent>,
+        render_state_dead_drop: DeadDrop<RenderWorldState>,
         event_sender: Sender<GameStateEvent>,
 
         gl: Gl,
@@ -346,7 +347,7 @@ impl RenderState {
         let start_time = std::time::Instant::now();
         let mut last_time = start_time.elapsed().as_millis();
         let mut dt;
-        let mut last_dts: [f32; 2] = [0.0, 0.0];
+        let mut avg_dt = 0.0;
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Track time
@@ -354,24 +355,13 @@ impl RenderState {
 
             dt = time - last_time;
             last_time = time;
-            last_dts[0] = last_dts[1];
-            last_dts[1] = dt as f32;
+            avg_dt = (avg_dt + dt as f32) / 2.0;
 
             let mut event_pump = sdl_context.event_pump().unwrap();
             let mouse_util = sdl_context.mouse();
 
-            // What I really wanted is a version of channel that just doesn't
-            // have queue at all --- when a new message is sent, it is copied
-            // over to replace the old one in a single atomic operation.
-            // Basically like a multithreading-safe double buffer. Unfortunately
-            // the existing double buffer implementations weren't designed to be
-            // used across threads, so I'll have to come back to this.
-            let mut new_render_state = None;
-            while let Ok(n) = render_state_receiver.try_recv() {
+            if let Some(nrs) = render_state_dead_drop.recv() {
                 trace!("Receieved new render state, merging in new changes");
-                new_render_state = Some(n);
-            }
-            if let Some(nrs) = new_render_state {
                 self.merge_changes(nrs);
             }
 
@@ -418,7 +408,6 @@ impl RenderState {
             self.render_g_to_hdr();
 
             // Render HDR buffer to screen with tone mapping, gamma correction, and auto exposure
-            let avg_dt = ((last_dts[0] + last_dts[1] + dt as f32) / 3.0).round();
             self.render_hdr_to_sdr(avg_dt, dt as f32);
 
             // Update ui

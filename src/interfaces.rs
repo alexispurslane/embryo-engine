@@ -6,9 +6,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-use crate::render_thread::RenderState;
+use crate::render_thread::RendererState;
 
-pub fn performance_stats_window(ui: &mut imgui::Ui, render_state: &RenderState, avg_dt: f32) {
+pub fn performance_stats_window(ui: &mut imgui::Ui, render_state: &RendererState, avg_dt: f32) {
     ui.window("Performance Stats")
         .size([300.0, 200.0], imgui::Condition::FirstUseEver)
         .position([1600.0, 20.0], imgui::Condition::FirstUseEver)

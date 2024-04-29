@@ -22,7 +22,9 @@ use crate::{
         objects::{Buffer, BufferObject},
         shaders::{self, Program},
     },
-    render_thread::{light_component_to_shader_light, RenderCameraState, RenderState, ShaderLight},
+    render_thread::{
+        light_component_to_shader_light, RenderCameraState, RendererState, ShaderLight,
+    },
     CONFIG,
 };
 

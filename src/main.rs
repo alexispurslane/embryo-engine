@@ -29,7 +29,7 @@ use entity::EntitySystem;
 use gl::Gl;
 use lazy_static::lazy_static;
 use render_gl::objects::BufferObject;
-use render_thread::{RenderState, RenderStateEvent};
+use render_thread::{RenderWorldState, RendererState};
 use resource_manager::ResourceManager;
 use std::{
     collections::HashMap,
@@ -42,6 +42,9 @@ use std::{
 use update_thread::{GameState, GameStateEvent};
 use utils::config::WindowMode;
 
+use crate::dead_drop::DeadDrop;
+
+mod dead_drop;
 mod entity;
 mod events;
 mod interfaces;
@@ -169,7 +172,7 @@ pub fn main() {
     let (width, height) = window.size();
 
     let mut game_state = GameState::new();
-    let mut render_state = RenderState::new(&gl, width, height);
+    let mut render_state = RendererState::new(&gl, width, height);
     let resource_manager = ResourceManager::new();
 
     debug!("Initial game state created");
@@ -200,17 +203,14 @@ pub fn main() {
 
     ////// Update thread
 
-    let (render_state_sender, render_state_receiver): (
-        Sender<RenderStateEvent>,
-        Receiver<RenderStateEvent>,
-    ) = channel();
+    let render_state_dead_drop = DeadDrop::default();
     let (event_sender, event_receiver): (Sender<GameStateEvent>, Receiver<GameStateEvent>) =
         channel();
 
     update_thread::spawn_update_loop(
         game_state,
         &resource_manager,
-        render_state_sender,
+        render_state_dead_drop.clone(),
         event_receiver,
         &window,
         running.clone(),
@@ -221,7 +221,7 @@ pub fn main() {
     ////// Render thread
     render_state.render_loop(
         &resource_manager,
-        render_state_receiver,
+        render_state_dead_drop,
         event_sender,
         gl,
         &sdl_context,
