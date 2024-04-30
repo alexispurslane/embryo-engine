@@ -33,7 +33,6 @@ pub enum SceneCommand {
     MoveCameraInDirection(Direction),
     RotateCamera(PitchYawRoll),
     DisplaceEntity(Entity, glam::Vec3),
-    Exit(),
 }
 
 pub enum GameStateEvent {
@@ -67,7 +66,6 @@ pub struct GameState {
     light_count: usize,
     command_queue: Vec<SceneCommand>,
     entities: EntitySystem,
-    running: bool,
     changed_diff: GameStateDiff,
 }
 // NOTE: Same logic as for the Send implementation for Model: I will never be
@@ -87,7 +85,6 @@ impl GameState {
             camera: None,
             command_queue: vec![],
             entities: EntitySystem::new(),
-            running: true,
             lights: Vec::with_capacity(CONFIG.performance.max_lights),
             light_count: 0,
             changed_diff: GameStateDiff {
@@ -176,7 +173,6 @@ impl GameState {
                 SceneCommand::DisplaceEntity(entity, rel_vec) => {
                     self.displace_entity(entity, rel_vec)
                 }
-                SceneCommand::Exit() => self.running = false,
             }
         }
     }
@@ -197,7 +193,6 @@ impl GameState {
     ) {
         let (width, height) = window.size();
         let core_ids = core_affinity::get_core_ids().unwrap();
-        let running = running.clone();
         let interval = CONFIG.performance.update_interval as f32;
 
         std::thread::spawn(move || {
@@ -209,7 +204,7 @@ impl GameState {
                 let mut last_time = time.elapsed().as_millis();
                 let mut dt: f32;
                 let mut lag = 0.0;
-                while self.running {
+                while running.load(std::sync::atomic::Ordering::SeqCst) {
                     let current_time = time.elapsed().as_millis();
                     dt = (current_time - last_time) as f32;
                     lag += dt;
@@ -226,14 +221,7 @@ impl GameState {
                     if total_lag > interval {
                         // Catch up with events
                         while let Some(event) = event_receiver.try_iter().next() {
-                            if let GameStateEvent::SDLEvent(sdl2::event::Event::Quit {
-                                timestamp,
-                            }) = event
-                            {
-                                running.store(false, std::sync::atomic::Ordering::SeqCst);
-                            } else {
-                                events::handle_event(&mut self, event, lag);
-                            }
+                            events::handle_event(&mut self, event, lag);
                         }
 
                         if self.changed_diff.any_changed() {
@@ -318,7 +306,6 @@ impl GameState {
                         }
                     }
                 }
-                running.store(false, std::sync::atomic::Ordering::SeqCst);
             }
         });
     }

@@ -278,6 +278,9 @@ pub fn main() {
                 } => {
                     mouse_util.set_relative_mouse_mode(!mouse_util.relative_mouse_mode());
                 }
+                sdl2::event::Event::Quit { timestamp } => {
+                    running.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
                 _ => {
                     let etype = if event.is_keyboard() {
                         "Keyboard"
