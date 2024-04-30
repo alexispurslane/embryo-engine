@@ -21,21 +21,19 @@ use crate::{
     update_thread::GameStateEvent,
     utils, CONFIG,
 };
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use gl::Gl;
 use std::{
     any::Any,
     collections::HashMap,
     ffi::{CStr, CString},
-    sync::{
-        atomic::AtomicBool,
-        mpsc::{Receiver, Sender},
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
+use crate::SendableGl;
 use bytes::{BufMut, Bytes, BytesMut};
-use gl::Gl;
 use glam::Vec4Swizzles;
-use sdl2::event::Event;
+use sdl2::{event::Event, video::GLContext};
 
 pub struct RenderWorldState {
     pub camera: Option<RenderCameraState>,
@@ -64,6 +62,8 @@ const SIMPLE_PROJECT_SHADER: usize = 10;
 pub struct RendererState {
     gl: Gl,
 
+    pub resource_manager: ResourceManager,
+
     pub viewport_size: (u32, u32),
 
     pub camera: Option<RenderCameraState>,
@@ -90,7 +90,8 @@ pub struct RendererState {
 }
 
 impl RendererState {
-    pub fn new(gl: &Gl, width: u32, height: u32) -> Self {
+    pub fn new(gl: SendableGl, resource_manager: ResourceManager, width: u32, height: u32) -> Self {
+        let gl = gl.0;
         let depthstencil = Texture::<Depth24Stencil8>::new_allocated(
             &gl,
             TextureParameters {
@@ -104,6 +105,7 @@ impl RendererState {
         );
         RendererState {
             gl: gl.clone(),
+            resource_manager,
             viewport_size: (width, height),
             camera: None,
             shader_programs: HashMap::new(),
@@ -330,17 +332,10 @@ impl RendererState {
 
     pub fn render_loop(
         &mut self,
-        resource_manager: &ResourceManager,
 
         render_state_dead_drop: DeadDrop<RenderWorldState>,
         event_sender: Sender<GameStateEvent>,
-
-        gl: Gl,
-        sdl_context: &sdl2::Sdl,
-        imgui: &mut imgui::Context,
-        platform: &mut imgui_sdl2_support::SdlPlatform,
-        renderer: &imgui_opengl_renderer::Renderer,
-        window: &sdl2::video::Window,
+        swap_buffers: impl Fn(),
 
         running: Arc<AtomicBool>,
     ) {
@@ -357,49 +352,12 @@ impl RendererState {
             last_time = time;
             avg_dt = (avg_dt + dt as f32) / 2.0;
 
-            let mut event_pump = sdl_context.event_pump().unwrap();
-            let mouse_util = sdl_context.mouse();
-
             if let Some(nrs) = render_state_dead_drop.recv() {
-                trace!("Receieved new render state, merging in new changes");
                 self.merge_changes(nrs);
             }
 
-            for event in event_pump.poll_iter() {
-                platform.handle_event(imgui, &event);
-                match event {
-                    sdl2::event::Event::KeyDown {
-                        scancode: Some(sdl2::keyboard::Scancode::Escape),
-                        ..
-                    } => {
-                        mouse_util.set_relative_mouse_mode(!mouse_util.relative_mouse_mode());
-                    }
-                    _ => {
-                        let etype = if event.is_keyboard() {
-                            "Keyboard"
-                        } else if event.is_mouse() {
-                            "Mouse"
-                        } else if event.is_window() {
-                            "Window"
-                        } else {
-                            "Other"
-                        };
-                        trace!("Sending {etype} event to update thread");
-                        let _ = event_sender.send(GameStateEvent::SDLEvent(event)).unwrap();
-                    }
-                }
-            }
-
-            if mouse_util.relative_mouse_mode() {
-                event_sender
-                    .send(GameStateEvent::FrameEvent(
-                        event_pump.keyboard_state().scancodes().collect(),
-                        event_pump.relative_mouse_state(),
-                    ))
-                    .unwrap();
-            }
-
-            systems::integrate_loaded_models(&gl, resource_manager, self);
+            self.resource_manager
+                .try_integrate_loaded_models(&mut self.models, &self.gl);
 
             // Render world to gbuffer
             self.render_to_g();
@@ -410,16 +368,7 @@ impl RendererState {
             // Render HDR buffer to screen with tone mapping, gamma correction, and auto exposure
             self.render_hdr_to_sdr(avg_dt, dt as f32);
 
-            // Update ui
-            platform.prepare_frame(imgui, &window, &event_pump);
-            let ui = imgui.new_frame();
-            interfaces::performance_stats_window(ui, &self, avg_dt);
-
-            // Render ui
-            renderer.render(imgui);
-
-            // Swap buffers!
-            window.gl_swap_window();
+            swap_buffers();
         }
     }
 

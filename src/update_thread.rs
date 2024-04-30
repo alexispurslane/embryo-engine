@@ -6,13 +6,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::{
     fmt::Debug,
-    sync::{
-        atomic::AtomicBool,
-        mpsc::{Receiver, Sender},
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 
@@ -64,6 +61,7 @@ impl GameStateDiff {
 }
 
 pub struct GameState {
+    pub resource_manager: ResourceManager,
     camera: Option<Entity>,
     lights: Vec<Entity>,
     light_count: usize,
@@ -83,8 +81,9 @@ unsafe impl Send for GameState {}
 unsafe impl Sync for GameState {}
 
 impl GameState {
-    pub fn new() -> Self {
+    pub fn new(resource_manager: ResourceManager) -> Self {
         Self {
+            resource_manager,
             camera: None,
             command_queue: vec![],
             entities: EntitySystem::new(),
@@ -181,148 +180,146 @@ impl GameState {
             }
         }
     }
-}
 
-pub fn spawn_update_loop(
-    mut game_state: GameState,
-    resource_manager: &ResourceManager,
-    render_state_dead_drop: DeadDrop<RenderWorldState>,
-    event_receiver: Receiver<GameStateEvent>,
+    pub fn load_initial_entities(&mut self) {
+        let new_entities = systems::load_entities(self);
+        systems::load_entity_models(self, &new_entities);
+    }
 
-    window: &sdl2::video::Window,
+    pub fn spawn_update_loop(
+        mut self,
+        render_state_dead_drop: DeadDrop<RenderWorldState>,
+        event_receiver: Receiver<GameStateEvent>,
 
-    running: Arc<AtomicBool>,
-) {
-    let (width, height) = window.size();
-    let core_ids = core_affinity::get_core_ids().unwrap();
-    let running = running.clone();
-    let interval = CONFIG.performance.update_interval as f32;
-    std::thread::spawn(move || {
-        debug!("Spawned update thread");
-        let res = core_affinity::set_for_current(core_ids[0]);
-        if res {
-            let time = std::time::Instant::now();
-            let start_time = time.elapsed().as_millis();
-            let mut last_time = time.elapsed().as_millis();
-            let mut dt: f32;
-            let mut lag = 0.0;
-            while game_state.running {
-                let current_time = time.elapsed().as_millis();
-                dt = (current_time - last_time) as f32;
-                lag += dt;
-                last_time = current_time;
+        window: &sdl2::video::Window,
 
-                let total_lag = lag;
-                // Catch up with things that require a maximum step size to be stable
-                while lag > interval {
-                    let delta_time = lag.min(interval);
-                    systems::physics(&mut game_state, delta_time, current_time - start_time);
-                    lag -= interval;
-                }
+        running: Arc<AtomicBool>,
+    ) {
+        let (width, height) = window.size();
+        let core_ids = core_affinity::get_core_ids().unwrap();
+        let running = running.clone();
+        let interval = CONFIG.performance.update_interval as f32;
 
-                if total_lag > interval {
-                    trace!("Digesting events from window/render thread");
-                    // Catch up with events
-                    while let Some(event) = event_receiver.try_iter().next() {
-                        if let GameStateEvent::SDLEvent(sdl2::event::Event::Quit { timestamp }) =
-                            event
-                        {
-                            running.store(false, std::sync::atomic::Ordering::SeqCst);
-                        } else {
-                            events::handle_event(&mut game_state, event, lag);
-                        }
+        std::thread::spawn(move || {
+            debug!("Spawned update thread");
+            let res = core_affinity::set_for_current(core_ids[0]);
+            if res {
+                let time = std::time::Instant::now();
+                let start_time = time.elapsed().as_millis();
+                let mut last_time = time.elapsed().as_millis();
+                let mut dt: f32;
+                let mut lag = 0.0;
+                while self.running {
+                    let current_time = time.elapsed().as_millis();
+                    dt = (current_time - last_time) as f32;
+                    lag += dt;
+                    last_time = current_time;
+
+                    let total_lag = lag;
+                    // Catch up with things that require a maximum step size to be stable
+                    while lag > interval {
+                        let delta_time = lag.min(interval);
+                        systems::physics(&mut self, delta_time, current_time - start_time);
+                        lag -= interval;
                     }
 
-                    if game_state.changed_diff.any_changed() {
-                        trace!("Game state changed");
-                        let cam = {
-                            if game_state.changed_diff.camera_changed {
-                                trace!("Camera state has changed");
-                                let camera = game_state.camera.expect("Must have camera");
-                                let cc = game_state
+                    if total_lag > interval {
+                        // Catch up with events
+                        while let Some(event) = event_receiver.try_iter().next() {
+                            if let GameStateEvent::SDLEvent(sdl2::event::Event::Quit {
+                                timestamp,
+                            }) = event
+                            {
+                                running.store(false, std::sync::atomic::Ordering::SeqCst);
+                            } else {
+                                events::handle_event(&mut self, event, lag);
+                            }
+                        }
+
+                        if self.changed_diff.any_changed() {
+                            let cam =
+                                {
+                                    if self.changed_diff.camera_changed {
+                                        let camera = self.camera.expect("Must have camera");
+                                        let cc = self
                                     .entities
                                     .get_component::<CameraComponent>(camera)
                                     .expect("Camera must still exist and have camera component!");
-                                let ct = game_state
+                                        let ct = self
                                     .entities
                                     .get_component::<TransformComponent>(camera)
                                     .expect(
                                         "Camera must still exist and have transform component!",
                                     );
 
-                                Some(RenderCameraState {
-                                    view: ct.point_of_view(),
-                                    proj: cc.project(width, height),
-                                })
-                            } else {
-                                None
-                            }
-                        };
-                        let matrices = {
-                            if game_state.changed_diff.entities_changed {
-                                trace!("Entity transforms have changed");
-                                // We DON'T use the entities_mut() command here
-                                // because if we did, it would lead to a degenerate
-                                // loop of stuff being marked changed every frame
-                                // once the first change happens
-                                Some(
-                                    game_state
-                                        .entities
-                                        .get_component_vec_mut::<TransformComponent>()
-                                        .iter_mut()
-                                        .map(|opt_tc| {
-                                            opt_tc.as_mut().map(|tc| tc.get_matrix().clone())
+                                        Some(RenderCameraState {
+                                            view: ct.point_of_view(),
+                                            proj: cc.project(width, height),
                                         })
-                                        .collect(),
-                                )
-                            } else {
-                                None
+                                    } else {
+                                        None
+                                    }
+                                };
+                            let matrices = {
+                                if self.changed_diff.entities_changed {
+                                    // We DON'T use the entities_mut() command here
+                                    // because if we did, it would lead to a degenerate
+                                    // loop of stuff being marked changed every frame
+                                    // once the first change happens
+                                    Some(
+                                        self.entities
+                                            .get_component_vec_mut::<TransformComponent>()
+                                            .iter_mut()
+                                            .map(|opt_tc| {
+                                                opt_tc.as_mut().map(|tc| tc.get_matrix().clone())
+                                            })
+                                            .collect(),
+                                    )
+                                } else {
+                                    None
+                                }
+                            };
+                            let lights = {
+                                if self.changed_diff.lights_changed {
+                                    Some(
+                                        self.lights
+                                            .iter()
+                                            .map(|e| {
+                                                let lc = self
+                                                    .entities
+                                                    .get_component::<LightComponent>(*e)
+                                                    .unwrap();
+                                                let tc = self
+                                                    .entities
+                                                    .get_component::<TransformComponent>(*e)
+                                                    .unwrap();
+                                                light_component_to_shader_light(&lc, &tc)
+                                            })
+                                            .collect(),
+                                    )
+                                } else {
+                                    None
+                                }
+                            };
+                            render_state_dead_drop.send(RenderWorldState {
+                                camera: cam,
+                                entity_generations: Some(
+                                    self.entities.current_entity_generations.clone(),
+                                ),
+                                entity_transforms: matrices.map(|x| Box::new(x)),
+                                lights: lights.map(|x| Box::new(x)),
+                            });
+                        }
+                        if CONFIG.performance.cap_update_fps {
+                            let sleep_time = interval - dt;
+                            if sleep_time > 0.0 {
+                                std::thread::sleep(Duration::from_millis(sleep_time as u64));
                             }
-                        };
-                        let lights = {
-                            if game_state.changed_diff.lights_changed {
-                                trace!("Light list has changed");
-                                Some(
-                                    game_state
-                                        .lights
-                                        .iter()
-                                        .map(|e| {
-                                            let lc = game_state
-                                                .entities
-                                                .get_component::<LightComponent>(*e)
-                                                .unwrap();
-                                            let tc = game_state
-                                                .entities
-                                                .get_component::<TransformComponent>(*e)
-                                                .unwrap();
-                                            light_component_to_shader_light(&lc, &tc)
-                                        })
-                                        .collect(),
-                                )
-                            } else {
-                                None
-                            }
-                        };
-                        trace!("Sending new state to render thread");
-                        render_state_dead_drop.send(RenderWorldState {
-                            camera: cam,
-                            entity_generations: Some(
-                                game_state.entities.current_entity_generations.clone(),
-                            ),
-                            entity_transforms: matrices.map(|x| Box::new(x)),
-                            lights: lights.map(|x| Box::new(x)),
-                        });
-                    }
-                    if CONFIG.performance.cap_update_fps {
-                        let sleep_time = interval - dt;
-                        if sleep_time > 0.0 {
-                            trace!("last frame took less than update interval ({interval} - {dt} = {sleep_time}), sleeping to make up for it.");
-                            std::thread::sleep(Duration::from_millis(sleep_time as u64));
                         }
                     }
                 }
+                running.store(false, std::sync::atomic::Ordering::SeqCst);
             }
-            running.store(false, std::sync::atomic::Ordering::SeqCst);
-        }
-    });
+        });
+    }
 }

@@ -21,23 +21,23 @@ extern crate sdl2;
 extern crate log;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
+extern crate crossbeam_channel;
 extern crate imgui;
 extern crate imgui_opengl_renderer;
 extern crate imgui_sdl2_support;
 
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use entity::EntitySystem;
 use gl::Gl;
 use lazy_static::lazy_static;
 use render_gl::objects::BufferObject;
 use render_thread::{RenderWorldState, RendererState};
 use resource_manager::ResourceManager;
+use sdl2::video::GLContext;
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::AtomicBool,
-        mpsc::{channel, Receiver, Sender},
-        Arc,
-    },
+    ops::Deref,
+    sync::{atomic::AtomicBool, Arc, Condvar, Mutex},
 };
 use update_thread::{GameState, GameStateEvent};
 use utils::config::WindowMode;
@@ -57,6 +57,20 @@ mod utils;
 
 lazy_static! {
     static ref CONFIG: utils::config::GameConfig = utils::config::read_config();
+}
+
+struct ShareablePtr<T>(*mut T);
+unsafe impl<T> Sync for ShareablePtr<T> {}
+unsafe impl<T> Send for ShareablePtr<T> {}
+
+struct SendableGl(Gl);
+unsafe impl Send for SendableGl {}
+
+impl Deref for SendableGl {
+    type Target = Gl;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 pub fn main() {
@@ -137,9 +151,9 @@ pub fn main() {
     ///////// Initialize OpenGL
 
     let _gl_context = window.gl_create_context().unwrap();
-    let gl = gl::Gl::load_with(|s| {
+    let gl = SendableGl(gl::Gl::load_with(|s| {
         video_subsystem.gl_get_proc_address(s) as *const std::os::raw::c_void
-    });
+    }));
     unsafe {
         gl.ClampColor(gl::CLAMP_READ_COLOR, gl::FIXED_ONLY);
     }
@@ -171,31 +185,7 @@ pub fn main() {
 
     let (width, height) = window.size();
 
-    let mut game_state = GameState::new();
-    let mut render_state = RendererState::new(&gl, width, height);
     let resource_manager = ResourceManager::new();
-
-    debug!("Initial game state created");
-
-    render_state.load_shaders();
-
-    debug!("Shaders loaded");
-
-    let new_entities = systems::load_entities(&mut game_state);
-
-    debug!("Game world entities constructed");
-
-    systems::unload_entity_models(
-        &mut game_state,
-        &mut render_state,
-        &resource_manager,
-        &new_entities,
-    );
-    systems::load_entity_models(&mut game_state, &resource_manager, &new_entities);
-
-    debug!("3d model loading initiated");
-
-    info!("Initial game state loaded");
 
     ///////// Game loop
 
@@ -205,11 +195,11 @@ pub fn main() {
 
     let render_state_dead_drop = DeadDrop::default();
     let (event_sender, event_receiver): (Sender<GameStateEvent>, Receiver<GameStateEvent>) =
-        channel();
+        unbounded();
 
-    update_thread::spawn_update_loop(
-        game_state,
-        &resource_manager,
+    let mut game_state = GameState::new(resource_manager.clone());
+    game_state.load_initial_entities();
+    game_state.spawn_update_loop(
         render_state_dead_drop.clone(),
         event_receiver,
         &window,
@@ -219,18 +209,98 @@ pub fn main() {
     info!("Update thread started");
 
     ////// Render thread
-    render_state.render_loop(
-        &resource_manager,
-        render_state_dead_drop,
-        event_sender,
-        gl,
-        &sdl_context,
-        &mut imgui,
-        &mut platform,
-        &renderer,
-        &window,
-        running,
-    );
 
-    info!("Render thread started");
+    // Now we need to transfer the window's GL context to the render thread, to
+    // free us up to focus on just the window itself and render on a different
+    // thread, which involves... unsafe shenanigans.
+    //
+    // See https://github.com/vheuken/SDL-Render-Thread-Example/blob/master/main.cpp for a worked example of what I'm trying to do.
+    unsafe {
+        sdl2::sys::SDL_GL_MakeCurrent(
+            window.raw(),
+            std::ptr::null::<sdl2::sys::SDL_GLContext>() as *mut std::ffi::c_void,
+        );
+    }
+
+    let safe_to_continue = Arc::new(Mutex::new(()));
+    let shareable_window = ShareablePtr(window.raw());
+    let shareable_gl_context;
+    unsafe {
+        shareable_gl_context = ShareablePtr(_gl_context.raw());
+    }
+
+    {
+        let renderer_set_up = safe_to_continue.clone();
+        let running = running.clone();
+        let event_sender = event_sender.clone();
+        std::thread::spawn(move || {
+            let window = shareable_window;
+            let window = window.0;
+            {
+                renderer_set_up.lock();
+                unsafe {
+                    let gl_context = shareable_gl_context;
+                    let gl_context = gl_context.0;
+                    sdl2::sys::SDL_GL_MakeCurrent(
+                        window as *mut sdl2::sys::SDL_Window,
+                        gl_context as *mut std::ffi::c_void,
+                    );
+                }
+            }
+            let mut renderer_state =
+                RendererState::new(gl, resource_manager.clone(), width, height);
+            renderer_state.load_shaders();
+            renderer_state.render_loop(
+                render_state_dead_drop,
+                event_sender,
+                move || unsafe {
+                    sdl2::sys::SDL_GL_SwapWindow(window);
+                },
+                running,
+            );
+        });
+    }
+
+    // Only continue when the other thread is done making these consistent.
+    //
+    safe_to_continue.lock();
+
+    let mut event_pump = sdl_context.event_pump().unwrap();
+    let mouse_util = sdl_context.mouse();
+
+    while running.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(event) = event_pump.wait_event_timeout(7) {
+            platform.handle_event(&mut imgui, &event);
+            match event {
+                sdl2::event::Event::KeyDown {
+                    scancode: Some(sdl2::keyboard::Scancode::Escape),
+                    ..
+                } => {
+                    mouse_util.set_relative_mouse_mode(!mouse_util.relative_mouse_mode());
+                }
+                _ => {
+                    let etype = if event.is_keyboard() {
+                        "Keyboard"
+                    } else if event.is_mouse() {
+                        "Mouse"
+                    } else if event.is_window() {
+                        "Window"
+                    } else {
+                        "Other"
+                    };
+                    trace!("Sending {etype} event to update thread");
+                    let _ = event_sender.send(GameStateEvent::SDLEvent(event)).unwrap();
+                }
+            }
+        }
+
+        if mouse_util.relative_mouse_mode() {
+            event_sender
+                .send(GameStateEvent::FrameEvent(
+                    event_pump.keyboard_state().scancodes().collect(),
+                    event_pump.relative_mouse_state(),
+                ))
+                .unwrap();
+        }
+    }
 }

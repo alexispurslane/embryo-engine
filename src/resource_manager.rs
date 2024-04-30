@@ -8,13 +8,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, RwLock,
-    },
+    sync::{Arc, RwLock},
     thread::{self, JoinHandle},
 };
 
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use gl::Gl;
 
 use rayon::prelude::*;
@@ -32,6 +30,7 @@ pub enum ResourceRequest {
     WorldChunks(Vec<(u32, u32)>),
 }
 
+#[derive(Clone)]
 pub struct ResourceManager {
     pub request_sender: Sender<ResourceRequest>,
     pub model_response: Receiver<(String, Model)>,
@@ -54,10 +53,10 @@ struct ResourceManagerState {
 
 impl ResourceManager {
     pub fn new() -> Self {
-        let (reqs, request_receiver) = channel();
-        let (model_response_sender, model_response) = channel();
-        let (tex_response_sender, texture_response) = channel();
-        let (chunk_response_sender, chunk_response) = channel();
+        let (reqs, request_receiver) = unbounded();
+        let (model_response_sender, model_response) = unbounded();
+        let (tex_response_sender, texture_response) = unbounded();
+        let (chunk_response_sender, chunk_response) = unbounded();
 
         let state = Arc::new(ResourceManagerState {
             loaded_loading_models: RwLock::new(HashMap::new()),
@@ -152,6 +151,9 @@ impl ResourceManager {
     /// Checks to see if there's a new batch of models done loading. If there
     /// is, then block and integrate it. Else return. Returns true if there was
     /// new stuff and false otherwise.
+    ///
+    /// FIXME: remove models not in the loaded model's entity list from the og
+    /// model's entity list as well, so we can unload models properly
     pub fn try_integrate_loaded_models(
         &self,
         models: &mut HashMap<String, Model>,

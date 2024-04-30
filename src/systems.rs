@@ -109,36 +109,8 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
     entities
 }
 
-pub fn unload_entity_models(
-    scene: &mut GameState,
-    render: &mut RendererState,
-    resource_manager: &ResourceManager,
-    new_entities: &Vec<Entity>,
-) {
-    let mut removes = vec![];
-    for entity in new_entities {
-        let model_component = scene
-            .entities()
-            .get_component::<ModelComponent>(*entity)
-            .unwrap();
-        removes.push((model_component.path.clone(), *entity));
-        if let Some(model) = render.models.get_mut(&model_component.path) {
-            model.entities.remove(&entity);
-            model.entities_dirty_flag = true;
-            if model.entities.is_empty() {
-                render.models.remove(&model_component.path);
-            }
-        }
-    }
-    resource_manager.request_unload_models(removes);
-}
-
-pub fn load_entity_models(
-    scene: &mut GameState,
-    resource_manager: &ResourceManager,
-    new_entities: &Vec<Entity>,
-) {
-    resource_manager.request_models(
+pub fn load_entity_models(scene: &mut GameState, new_entities: &Vec<Entity>) {
+    scene.resource_manager.request_models(
         new_entities
             .iter()
             .map(|e| {
@@ -150,14 +122,6 @@ pub fn load_entity_models(
             })
             .collect(),
     );
-}
-
-pub fn integrate_loaded_models(
-    gl: &Gl,
-    resource_manager: &ResourceManager,
-    render: &mut RendererState,
-) {
-    resource_manager.try_integrate_loaded_models(&mut render.models, gl);
 }
 
 pub fn physics(game_state: &mut GameState, dt: f32, time: u128) {}

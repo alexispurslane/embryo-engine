@@ -583,9 +583,6 @@ impl Model {
     }
 
     pub fn setup_model_gl(&mut self, gl: &Gl) {
-        if !thread::current().name().is_some_and(|x| x.contains("main")) {
-            panic!("Called OpenGL setup function on model while not on main thread: this is undefined behavior!");
-        }
         self.ibo = Some(BufferObject::<InstanceTransformVertex>::new(
             gl,
             gl::ARRAY_BUFFER,
