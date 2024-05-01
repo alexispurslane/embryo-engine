@@ -61,6 +61,56 @@ accepting contributions or pull requests until at least the basic
 architecture of the engine is completed), I thought it might be
 useful to have such a document so others can get a sense for what I'm going for.
 
+## Progress
+
+### Rendering
+
+- [x] Load and render glTF 3D models with textures and materials
+- [x] Runtime conversion of PBR to Blinn-Phong materials[^7]
+- [x] Dynamic ambient, diffuse, point, and spot lights with all the tunables
+- [x] Deferred shading and lighting pipeline with model instancing and batching and light bounding volumes
+- [x] Transforms, Models, Lights, and Cameras are all components with tunable parameters
+- [x] Camera pulls position from transform component on same entity
+- [x] HDR rendering, fairly advanced tonemapping
+- [ ] Text and UI elements (imGUI doesn't work with the new threading architecture)
+- [ ] Shadows
+- [ ] Bloom and fog
+- [ ] Normal maps
+- [ ] Emissive textures
+- [ ] Frustum culling of instances using geometry shaders
+- [ ] Display heightmaps using tessellation shaders
+- [ ] Antiportal culling
+- [ ] Skyboxes
+- [ ] Mirrors
+- [ ] Transparency
+- [ ] Caching
+- [ ] Particle effects
+- [ ] Transform hierarchies
+
+### General architecture
+
+- [x] Opens window with SDL2, displays renderer output
+- [x] Basic naive ECS with generational references fully implemented (can create new entities, delete old entities, reuse old entity IDs and detect when an entity reference is out of date, add and remove components from entities, have a few basic components) with test entities created
+- [x] Full asynchronous function parallel threading model with resource loader, renderer, event loop/window handler, and update loop
+- [x] Asynchronous thread-pool based resource loader and converter integrating with renderer and update loop
+- [x] Basic keyboard controls
+- [x] Relays events to update loop, can respond to user input to move the player entity around
+- [ ] Implement proper sparse set ECS
+- [ ] Add heightmap component
+- [ ] Implement event dispatch system and event listener registry
+- [ ] Implement WebAssembly Minimal Runtime based background (single-threaded) system scripts
+- [ ] Introduce actor-targeted events
+- [ ] Implement WebAssembly Minimal Runtime based data parallel event forwarding actor component behavior script pipelines
+- [ ] Implement realtime ECS backtracking query system[^9]
+
+### Resource Management(?)
+
+- [ ] Quadtree scene graph for spacial queries
+- [ ] Implement loading initial entities and world map from TOML configuration files
+- [ ] Implement unloading scenes or models
+- [ ] Implement auto chunking scenes as a build step for assets
+- [ ] Implement dynamic world streaming using the asynchronous threaded resource manager
+
 [^1]: <https://en.m.wikipedia.org/wiki/Looking_Glass_Studios>
 
 [^2]: <https://en.wikipedia.org/wiki/Ion_Storm>
@@ -83,3 +133,6 @@ useful to have such a document so others can get a sense for what I'm going for.
     <https://taleoftwowastelands.com/faq>, but even better.
     
 [^8]: https://wasix.org/
+[^7]: https://developer.valvesoftware.com/wiki/Adapting_PBR_Textures_to_Source
+
+[^9]: https://ajmmertens.medium.com/a-roadmap-to-entity-relationships-5b1d11ebb4eb
