@@ -83,7 +83,7 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
 
     let data = ["./data/models/heroine.glb"];
     let mut entities = vec![];
-    for i in 0..10000 {
+    for i in 0..1000 {
         let thing = scene.entities_mut().gen_entity();
         scene.entities_mut().add_component(
             thing,
