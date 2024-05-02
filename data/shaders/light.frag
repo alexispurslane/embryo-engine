@@ -13,13 +13,6 @@
 layout (location = 0) out vec4 FragColor;
 layout (location = 1) out vec4 BrightColor;
 
-in VS_OUT {
-    vec4 position;
-    vec3 normal;
-    vec2 texCoord;
-    vec4 tangent;
-} fs_in;
-
 layout (binding = 0, rgba16f) uniform readonly image2D gPosition;
 layout (binding = 1, rgba16f) uniform readonly image2D gNormal;
 layout (binding = 2, rgba16f) uniform readonly image2D gDiffuseColor;
@@ -134,9 +127,12 @@ void main()
     float diffuse = 0.0;
     float attenuation = 0.0;
 
+    vec3 position = imageLoad(gPosition, ivec2(gl_FragCoord.xy)).rgb;
+    vec3 normal = imageLoad(gNormal, ivec2(gl_FragCoord.xy)).rgb;
+
     renderLight(
-        imageLoad(gPosition, ivec2(gl_FragCoord.xy)).rgb,
-        imageLoad(gNormal, ivec2(gl_FragCoord.xy)).rgb,
+        position,
+        normal,
         specular,
         diffuse,
         attenuation

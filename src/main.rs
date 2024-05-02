@@ -22,9 +22,6 @@ extern crate log;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 extern crate crossbeam_channel;
-extern crate imgui;
-extern crate imgui_opengl_renderer;
-extern crate imgui_sdl2_support;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use entity::EntitySystem;
@@ -47,7 +44,6 @@ use crate::dead_drop::DeadDrop;
 mod dead_drop;
 mod entity;
 mod events;
-mod interfaces;
 mod render_gl;
 mod render_thread;
 mod resource_manager;
@@ -165,20 +161,6 @@ pub fn main() {
 
     debug!("OpenGL context created and configured");
 
-    ///////// Initialize imGUI
-
-    let mut imgui = imgui::Context::create();
-    imgui.set_ini_filename(None);
-    imgui.set_log_filename(None);
-    imgui
-        .fonts()
-        .add_font(&[imgui::FontSource::DefaultFontData { config: None }]);
-
-    let mut platform = imgui_sdl2_support::SdlPlatform::init(&mut imgui);
-    let renderer = imgui_opengl_renderer::Renderer::new(&mut imgui, &gl);
-
-    debug!("imGUI context, SDL support, and OpenGL renderer initialized ");
-
     info!("Game window created!");
 
     ///////// Initalize game
@@ -193,20 +175,40 @@ pub fn main() {
 
     ////// Update thread
 
+    let orig_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // invoke the default handler and exit the process
+        orig_hook(panic_info);
+        std::process::exit(1);
+    }));
+
     let render_state_dead_drop = DeadDrop::default();
     let (event_sender, event_receiver): (Sender<GameStateEvent>, Receiver<GameStateEvent>) =
         unbounded();
 
-    let mut game_state = GameState::new(resource_manager.clone());
-    game_state.load_initial_entities();
-    game_state.spawn_update_loop(
-        render_state_dead_drop.clone(),
-        event_receiver,
-        &window,
-        running.clone(),
-    );
-
-    info!("Update thread started");
+    {
+        let render_state_dead_drop = render_state_dead_drop.clone();
+        let resource_manager = resource_manager.clone();
+        let running = running.clone();
+        let event_receiver = event_receiver.clone();
+        std::thread::Builder::new()
+            .name("update".to_string())
+            .spawn(move || {
+                let res =
+                    core_affinity::get_core_ids().map(|ids| core_affinity::set_for_current(ids[0]));
+                if res.is_some_and(|r| r) {
+                    let mut game_state = GameState::new(resource_manager);
+                    game_state.load_initial_entities();
+                    info!("Update thread started");
+                    game_state.update_loop(
+                        render_state_dead_drop,
+                        event_receiver,
+                        (width, height),
+                        running.clone(),
+                    );
+                }
+            });
+    }
 
     ////// Render thread
 
@@ -233,44 +235,57 @@ pub fn main() {
         let renderer_set_up = safe_to_continue.clone();
         let running = running.clone();
         let event_sender = event_sender.clone();
-        std::thread::spawn(move || {
-            let window = shareable_window;
-            let window = window.0;
-            {
-                renderer_set_up.lock();
-                unsafe {
-                    let gl_context = shareable_gl_context;
-                    let gl_context = gl_context.0;
-                    sdl2::sys::SDL_GL_MakeCurrent(
-                        window as *mut sdl2::sys::SDL_Window,
-                        gl_context as *mut std::ffi::c_void,
+        std::thread::Builder::new()
+            .name("render".to_string())
+            .spawn(move || {
+                let res =
+                    core_affinity::get_core_ids().map(|ids| core_affinity::set_for_current(ids[1]));
+                if res.is_some_and(|r| r) {
+                    let window = shareable_window;
+                    let window = window.0;
+                    {
+                        renderer_set_up.lock();
+                        unsafe {
+                            let gl_context = shareable_gl_context;
+                            let gl_context = gl_context.0;
+                            sdl2::sys::SDL_GL_MakeCurrent(
+                                window as *mut sdl2::sys::SDL_Window,
+                                gl_context as *mut std::ffi::c_void,
+                            );
+                        }
+                    }
+                    let mut renderer_state =
+                        RendererState::new(gl, resource_manager.clone(), width, height);
+                    renderer_state.load_shaders();
+                    debug!("Render thread started");
+                    renderer_state.render_loop(
+                        render_state_dead_drop,
+                        event_sender,
+                        // NOTE: We want to do this with a callback so that the rest
+                        // of the render thread has no access to the window
+                        // pointer. This has to be done on the thread where the
+                        // GL context is current, because despite taking a
+                        // window pointer, this only really talks to the GL
+                        // driver, to tell it to swap buffers in FB0
+                        move || unsafe {
+                            sdl2::sys::SDL_GL_SwapWindow(window);
+                        },
+                        running,
                     );
                 }
-            }
-            let mut renderer_state =
-                RendererState::new(gl, resource_manager.clone(), width, height);
-            renderer_state.load_shaders();
-            renderer_state.render_loop(
-                render_state_dead_drop,
-                event_sender,
-                move || unsafe {
-                    sdl2::sys::SDL_GL_SwapWindow(window);
-                },
-                running,
-            );
-        });
+            });
     }
 
     // Only continue when the other thread is done making these consistent.
     //
     safe_to_continue.lock();
+    debug!("Event loop thread started");
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mouse_util = sdl_context.mouse();
 
     while running.load(std::sync::atomic::Ordering::SeqCst) {
         if let Some(event) = event_pump.wait_event_timeout(7) {
-            platform.handle_event(&mut imgui, &event);
             match event {
                 sdl2::event::Event::KeyDown {
                     scancode: Some(sdl2::keyboard::Scancode::Escape),

@@ -4,7 +4,6 @@ use crate::{
         light_component::LightComponent, mesh_component::Model,
         transform_component::TransformComponent, Entity, EntityID,
     },
-    interfaces,
     render_gl::{
         data::{Cvec3, InstanceTransformVertex, VertexPos, VertexTex},
         objects::{
@@ -351,6 +350,8 @@ impl RendererState {
             dt = time - last_time;
             last_time = time;
             avg_dt = (avg_dt + dt as f32) / 2.0;
+
+            println!("FPS: {}", 1000.0 / avg_dt);
 
             if let Some(nrs) = render_state_dead_drop.recv() {
                 self.merge_changes(nrs);
