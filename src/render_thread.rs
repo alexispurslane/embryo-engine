@@ -31,6 +31,7 @@ use std::{
     collections::HashMap,
     ffi::{CStr, CString},
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
+    time::Duration,
 };
 
 use crate::SendableGl;
@@ -299,7 +300,7 @@ impl RendererState {
         let mut last_time = start_time.elapsed().as_millis();
         let mut dt;
         let mut avg_dt = 0.0;
-        let mut avg_fps = 144.0;
+        let mut avg_fps;
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Track time

@@ -12,6 +12,7 @@ use rayon::slice::ParallelSlice;
 use std::{
     collections::{BinaryHeap, HashMap},
     fmt::Debug,
+    ops::{Deref, DerefMut},
     sync::{atomic::AtomicBool, Arc, RwLock},
     thread::panicking,
     time::Duration,
@@ -20,8 +21,9 @@ use std::{
 use crate::{
     dead_drop::DeadDrop,
     entity::{
-        camera_component::CameraComponent, light_component::LightComponent,
-        transform_component::TransformComponent, EntityID,
+        camera_component::CameraComponent, hierarchy_component::HierarchyComponent,
+        light_component::LightComponent, mesh_component::ModelComponent,
+        transform_component::TransformComponent, Component, EntityID,
     },
     events,
     render_thread::{light_component_to_shader_light, RenderCameraState, RenderWorldState},
@@ -80,30 +82,41 @@ pub enum GameStateEvent {
     ),
 }
 
-struct GameStateDiff {
-    camera_changed: bool,
-    lights_changed: bool,
-    command_queue_changed: bool,
-    entities_changed: bool,
+pub struct Accessor<T> {
+    dirty_flag: bool,
+    inner: T,
 }
 
-impl GameStateDiff {
-    pub fn any_changed(&self) -> bool {
-        self.camera_changed
-            || self.lights_changed
-            || self.command_queue_changed
-            || self.entities_changed
+impl<T> Accessor<T> {
+    pub fn new(val: T) -> Self {
+        Self {
+            dirty_flag: true,
+            inner: val,
+        }
+    }
+}
+
+impl<T> Deref for Accessor<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for Accessor<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.dirty_flag = true;
+        &mut self.inner
     }
 }
 
 pub struct GameState {
-    pub resource_manager: ResourceManager,
-    camera: Option<Entity>,
-    lights: Vec<Entity>,
-    light_count: usize,
-    command_queue: Vec<SceneCommand>,
-    entities: EntitySystem,
-    changed_diff: GameStateDiff,
+    resource_manager: ResourceManager,
+    pub camera: Accessor<Option<Entity>>,
+    pub lights: Accessor<Vec<Entity>>,
+    pub command_queue: Accessor<Vec<SceneCommand>>,
+    pub entities: EntitySystem,
+    transform_update_queue: BinaryHeap<EntityTransformationUpdate>,
     entity_transforms: HashMap<EntityID, glam::Mat4>,
 }
 
@@ -112,51 +125,38 @@ impl GameState {
         Self {
             resource_manager,
             entity_transforms: HashMap::new(),
-            camera: None,
-            command_queue: vec![],
+            camera: Accessor::new(None),
+            command_queue: Accessor::new(vec![]),
             entities: EntitySystem::new(),
-            lights: Vec::with_capacity(CONFIG.performance.max_lights),
-            light_count: 0,
-            changed_diff: GameStateDiff {
-                camera_changed: true,
-                lights_changed: true,
-                command_queue_changed: true,
-                entities_changed: true,
-            },
+            lights: Accessor::new(vec![]),
+            transform_update_queue: BinaryHeap::new(),
         }
     }
 
-    pub fn entities(&self) -> &EntitySystem {
-        &self.entities
+    pub fn gen_entity(&mut self) -> Entity {
+        self.entities.gen_entity()
     }
 
-    pub fn entities_mut(&mut self) -> &mut EntitySystem {
-        self.changed_diff.entities_changed = true;
-        &mut self.entities
+    pub fn add_component<T: Component + 'static>(&mut self, e: Entity, mut c: T) {
+        c.add_hook(e, self);
+        self.entities.add_component(e, c);
     }
 
-    pub fn camera(&self) -> &Option<Entity> {
-        &self.camera
-    }
-
-    pub fn lights(&self) -> &Vec<Entity> {
-        &self.lights
-    }
-
-    /// Adds an entity to the list of entities we're treating as active light sources. If this would overflow the list of entities, it just rotates them.
+    /// Adds an entity to the list of entities we're treating as active light
+    /// sources.
     pub fn register_light(&mut self, e: Entity) {
-        self.changed_diff.lights_changed = true;
-        if self.lights.len() < CONFIG.performance.max_lights {
-            self.lights.push(e);
-        } else {
-            self.lights[self.light_count] = e;
-        }
-        self.light_count = (self.light_count + 1) % CONFIG.performance.max_lights;
+        self.lights.push(e);
     }
 
+    /// Sets the current camera to the provided entity (assumes it has a camera and transform component)
     pub fn register_camera(&mut self, e: Entity) {
-        self.changed_diff.camera_changed = true;
-        self.camera = Some(e);
+        self.camera.replace(e);
+    }
+
+    // Sends a request to load whatever model the given entity has
+    pub fn load_model_for(&mut self, e: Entity, c: &ModelComponent) {
+        self.resource_manager
+            .request_models(vec![(c.path.clone(), e)]);
     }
 
     /// Queue world state changes
@@ -167,7 +167,7 @@ impl GameState {
     pub fn move_camera_by_vector(&mut self, d: Direction, dt: f32) {
         let camera_entity = self.camera.expect("No camera found");
         let mut camera_transform = self
-            .entities_mut()
+            .entities
             .get_component_mut::<TransformComponent>(camera_entity)
             .expect("Camera needs to have TransformComponent");
 
@@ -177,7 +177,7 @@ impl GameState {
     pub fn rotate_camera(&mut self, pyr: PitchYawRoll, dt: f32) {
         let camera_entity = self.camera.expect("No camera found");
         let mut camera_transform = self
-            .entities_mut()
+            .entities
             .get_component_mut::<TransformComponent>(camera_entity)
             .expect("Camera needs to have TransformComponent");
 
@@ -185,7 +185,7 @@ impl GameState {
     }
 
     pub fn displace_entity(&mut self, entity: Entity, rel_vec: glam::Vec3) {
-        self.entities_mut()
+        self.entities
             .get_component_mut::<TransformComponent>(entity)
             .expect("Displaced entity must have transform component")
             .displace_by(rel_vec);
@@ -208,8 +208,14 @@ impl GameState {
     }
 
     pub fn load_initial_entities(&mut self) {
-        let new_entities = systems::load_entities(self);
-        systems::load_entity_models(self, &new_entities);
+        systems::load_entities(self);
+    }
+
+    pub fn any_changed(&self) -> bool {
+        self.camera.dirty_flag
+            || self.lights.dirty_flag
+            || self.entities.dirty()
+            || self.command_queue.dirty_flag
     }
 
     pub fn update_loop(
@@ -234,23 +240,48 @@ impl GameState {
             lag += dt;
             last_time = current_time;
 
-            let total_lag = lag;
+            let missed_frames = (lag / interval).round() as usize;
+            let events = event_receiver.try_iter().collect::<Vec<_>>();
             // Catch up with things that require a maximum step size to be stable
             while lag > interval {
                 let delta_time = lag.min(interval);
                 systems::physics(&mut self, delta_time, current_time - start_time);
+
                 lag -= interval;
             }
+            for event in events.into_iter().rev().take(missed_frames).rev() {
+                match event {
+                    GameStateEvent::FrameEvent(scancodes, mouse_state) => {
+                        events::handle_keyboard(&mut self, scancodes, dt);
+                        events::handle_mouse(&mut self, &mouse_state, dt);
+                    }
+                    _ => events::handle_event(&mut self, event, dt),
+                }
+            }
 
-            if self.changed_diff.entities_changed {
-                let mut tcs = self.entities.get_component_vec_mut::<TransformComponent>();
-                let mut new_trans = BinaryHeap::new();
+            if self.entities.dirty() {
+                let mut tcs = self
+                    .entities
+                    .get_component_vec_mut::<TransformComponent>()
+                    .unwrap();
+                let hcs = self.entities.get_component_vec::<HierarchyComponent>();
                 for eid in 0..tcs.len() {
                     let (a, b) = tcs.split_at_mut(eid);
                     let (item, c) = b.split_at_mut(1);
                     if let Some(tc) = &mut item[0] {
-                        if let Some(parent) = tc.parent.and_then(|p_ref| {
+                        // We can't use a normal get_component::<T> because we
+                        // need to access the parent from the split transform
+                        // arrays above, so we have to do a little
+                        // monad-juggling
+                        let hc = hcs.as_ref().and_then(|hcs| hcs[eid].as_ref());
+                        if let Some(parent) = hc.and_then(|hc| {
+                            // If there is a hierarchy component, get the parent on it
+                            let p_ref = hc.parent;
+                            // Look up the parent's ID in the left slice, and if it isn't there, in the right slice.
                             a.get_mut(p_ref.id).or(c.get_mut(p_ref.id)).and_then(|ptc| {
+                                // If there's a row with that ID in one of those
+                                // slices, only return Some if that row actually
+                                // had Some in it *and* the generation matches
                                 ptc.as_mut().filter(|_| {
                                     self.entities
                                         .entity_generations
@@ -261,84 +292,81 @@ impl GameState {
                             })
                         }) {
                             if tc.dirty_flag || parent.dirty_flag {
-                                new_trans.push(EntityTransformationUpdate {
-                                    depth: tc.depth,
-                                    eid,
-                                    matrix: tc.transform.to_matrix(),
-                                    parent_matrix: Some(parent.transform.to_matrix()),
-                                });
+                                self.transform_update_queue
+                                    .push(EntityTransformationUpdate {
+                                        depth: hc.map_or(0, |x| x.depth),
+                                        eid,
+                                        matrix: tc.transform.to_matrix(),
+                                        parent_matrix: Some(parent.transform.to_matrix()),
+                                    });
                             }
                         } else {
                             if tc.dirty_flag {
-                                new_trans.push(EntityTransformationUpdate {
-                                    depth: tc.depth,
-                                    eid,
-                                    matrix: tc.transform.to_matrix(),
-                                    parent_matrix: None,
-                                });
+                                self.transform_update_queue
+                                    .push(EntityTransformationUpdate {
+                                        depth: 0,
+                                        eid,
+                                        matrix: tc.transform.to_matrix(),
+                                        parent_matrix: None,
+                                    });
                             }
                         }
                     }
-                }
-                for update in new_trans.iter() {
-                    self.entity_transforms.insert(
-                        update.eid,
-                        if let Some(pm) = update.parent_matrix {
-                            update.matrix * pm
-                        } else {
-                            update.matrix
-                        },
-                    );
+                    for update in self.transform_update_queue.drain() {
+                        self.entity_transforms.insert(
+                            update.eid,
+                            if let Some(pm) = update.parent_matrix {
+                                update.matrix * pm
+                            } else {
+                                update.matrix
+                            },
+                        );
+                    }
                 }
             }
 
-            if total_lag > interval {
-                // Catch up with events
-                while let Some(event) = event_receiver.try_iter().next() {
-                    events::handle_event(&mut self, event, lag);
-                }
+            // Catch up with events
 
-                if self.changed_diff.any_changed() {
-                    let camera = self.camera.expect("Must have camera");
-                    let cc = self
-                        .entities
-                        .get_component::<CameraComponent>(camera)
-                        .expect("Camera must still exist and have camera component!");
-                    let ct = self
-                        .entities
-                        .get_component::<TransformComponent>(camera)
-                        .expect("Camera must still exist and have transform component!");
+            if self.any_changed() {
+                let camera = self.camera.expect("Must have camera");
+                let cc = self
+                    .entities
+                    .get_component::<CameraComponent>(camera)
+                    .expect("Camera must still exist and have camera component!");
+                let ct = self
+                    .entities
+                    .get_component::<TransformComponent>(camera)
+                    .expect("Camera must still exist and have transform component!");
 
-                    rws_sender.send(RenderWorldState {
-                        lights: self
-                            .lights
-                            .iter()
-                            .map(|e| {
-                                let lc = self.entities.get_component::<LightComponent>(*e).unwrap();
-                                let tc = self
-                                    .entities
-                                    .get_component::<TransformComponent>(*e)
-                                    .unwrap();
-                                light_component_to_shader_light(&lc, &tc)
-                            })
-                            .collect(),
-                        active_camera: Some(RenderCameraState {
-                            view: ct.point_of_view(),
-                            proj: cc.project(width, height),
-                        }),
-                        entity_generations: self.entities.entity_generations.clone(),
-                        entity_transforms: self.entity_transforms.clone(),
-                    });
-                    self.changed_diff.camera_changed = false;
-                    self.changed_diff.entities_changed = false;
-                    self.changed_diff.lights_changed = false;
-                }
-                if CONFIG.performance.cap_update_fps {
-                    let sleep_time = interval - dt;
-                    if sleep_time > 0.0 {
-                        std::thread::sleep(Duration::from_millis(sleep_time as u64));
-                    }
-                }
+                rws_sender.send(RenderWorldState {
+                    lights: self
+                        .lights
+                        .iter()
+                        .map(|e| {
+                            let lc = self.entities.get_component::<LightComponent>(*e).unwrap();
+                            let tc = self
+                                .entities
+                                .get_component::<TransformComponent>(*e)
+                                .unwrap();
+                            light_component_to_shader_light(&lc, &tc)
+                        })
+                        .collect(),
+                    active_camera: Some(RenderCameraState {
+                        view: ct.point_of_view(),
+                        proj: cc.project(width, height),
+                    }),
+                    entity_generations: self.entities.entity_generations.clone(),
+                    entity_transforms: self.entity_transforms.clone(),
+                });
+                self.lights.dirty_flag = false;
+                self.camera.dirty_flag = false;
+                self.entities.clear_dirty();
+            }
+
+            // Cap update FPS (ignores option not to because it really doesn't even function right if you do that)
+            let sleep_time = interval - dt;
+            if sleep_time > 0.0 {
+                std::thread::sleep(Duration::from_millis(sleep_time as u64));
             }
         }
     }

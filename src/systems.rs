@@ -20,47 +20,30 @@ use rand::Rng;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use render_gl::shaders;
 
-pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
-    let e = scene.entities_mut().gen_entity();
-    scene.entities_mut().add_component(
+use self::entity::hierarchy_component::HierarchyComponent;
+
+pub fn load_entities(scene: &mut GameState) {
+    let e = scene.gen_entity();
+    scene.add_component(
         e,
         TransformComponent::new_from_rot_trans(glam::Vec3::Y, glam::vec3(0.0, 0.0, -3.0), true),
     );
-    scene
-        .entities_mut()
-        .add_component(e, CameraComponent { fov: 90.0 });
-    scene.register_camera(e);
-    let body = scene.entities_mut().gen_entity();
-    scene.entities_mut().add_component(
-        body,
-        TransformComponent::new_from_rot_trans(
-            glam::vec3(0.0, 0.0, 0.0),
-            glam::vec3(0.0, 0.0, 0.0),
-            false,
-        ),
-    );
-    scene.entities_mut().add_component(
-        body,
-        ModelComponent {
-            path: "./data/models/heroine.glb".to_string(),
-            shader_program: 0,
-        },
-    );
-    /*scene.entities_mut().add_component(
+    scene.add_component(e, CameraComponent { fov: 90.0 });
+    scene.add_component(
         e,
         LightComponent::Spot {
-            color: glam::vec3(0.4, 0.6, 0.8),
-            ambient: glam::vec3(0.0, 0.2, 0.3),
+            color: glam::vec3(14.0, 16.0, 18.0),
+            ambient: glam::vec3(0.0, 0.0, 0.0),
             cutoff: 0.0,
-            fade_exponent: 25.0,
+            fade_exponent: 15.0,
             attenuation: Attenuation {
                 constant: 0.2,
-                linear: 0.0,
-                quadratic: 0.0,
+                linear: 9.0,
+                quadratic: 1.9,
             },
         },
     );
-    scene.register_light(e);*/
+    scene.register_camera(e);
 
     let mut trng = rand::thread_rng();
     let colors = &[
@@ -69,8 +52,8 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         glam::vec3(0.1, 0.1, 10.2),
     ];
     for i in 0..30 {
-        let e = scene.entities_mut().gen_entity();
-        scene.entities_mut().add_component(
+        let e = scene.gen_entity();
+        scene.add_component(
             e,
             TransformComponent::new_from_rot_trans(
                 glam::Vec3::ZERO,
@@ -82,7 +65,7 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
                 true,
             ),
         );
-        scene.entities_mut().add_component(
+        scene.add_component(
             e,
             LightComponent::Point {
                 color: colors[trng.gen_range(0..colors.len())],
@@ -94,64 +77,48 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
                 },
             },
         );
-        scene.register_light(e);
     }
 
-    let parent = scene.entities_mut().gen_entity();
-    scene.entities_mut().add_component(
+    let parent = scene.gen_entity();
+    scene.add_component(
         parent,
         TransformComponent::new_from_rot_trans(glam::Vec3::ZERO, glam::Vec3::ZERO, false),
     );
-    println!("parent id: {}", parent.id);
     let data = ["./data/models/heroine.glb"];
-    let mut entities = vec![];
     for i in 0..10000 {
-        let thing = scene.entities_mut().gen_entity();
-        scene.entities_mut().add_component(
+        let thing = scene.gen_entity();
+        scene.add_component(
             thing,
             ModelComponent {
                 path: data[trng.gen_range(0..data.len())].to_string(),
                 shader_program: 0,
             },
         );
-        let mut tc = TransformComponent::new_from_rot_trans(
-            glam::Vec3::ZERO,
-            glam::vec3(
-                (i % 25) as f32 * 1.0,
-                ((i / 25) % 25) as f32 * 2.0,
-                (i / 625) as f32 * 1.0,
-            ),
-            false,
-        );
         if i < 100 {
-            tc.parent = Some(parent);
-            tc.depth = 1;
+            scene.add_component(thing, HierarchyComponent::new(parent))
         }
-        scene.entities_mut().add_component(thing, tc);
-        entities.push(thing);
+        scene.add_component(
+            thing,
+            TransformComponent::new_from_rot_trans(
+                glam::Vec3::ZERO,
+                glam::vec3(
+                    (i % 25) as f32 * 1.0,
+                    ((i / 25) % 25) as f32 * 2.0,
+                    (i / 625) as f32 * 1.0,
+                ),
+                false,
+            ),
+        );
     }
-    entities
 }
 
-pub fn load_entity_models(scene: &mut GameState, new_entities: &Vec<Entity>) {
-    scene.resource_manager.request_models(
-        new_entities
-            .iter()
-            .map(|e| {
-                let model_component = scene
-                    .entities()
-                    .get_component::<ModelComponent>(*e)
-                    .unwrap();
-                (model_component.path.clone(), *e)
-            })
-            .collect(),
-    );
-}
+pub fn load_entity_models(scene: &mut GameState, new_entities: &Vec<Entity>) {}
 
 pub fn physics(game_state: &mut GameState, dt: f32, time: u128) {
     let transforms = &mut game_state
-        .entities_mut()
-        .get_component_vec_mut::<TransformComponent>();
-    let e = &mut transforms[32];
+        .entities
+        .get_component_vec_mut::<TransformComponent>()
+        .unwrap();
+    let e = &mut transforms[31];
     e.as_mut().unwrap().displace_by(glam::vec3(0.0, 0.0, 0.005));
 }

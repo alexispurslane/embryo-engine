@@ -10,13 +10,15 @@ use std::{
     any::Any,
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
+    sync::atomic::AtomicBool,
 };
 
-use crate::systems;
+use crate::{systems, update_thread::GameState};
 
 use self::mesh_component::ModelComponent;
 
 pub mod camera_component;
+pub mod hierarchy_component;
 pub mod light_component;
 pub mod mesh_component;
 pub mod terrain_component;
@@ -28,6 +30,7 @@ pub type EntityID = usize;
 
 pub trait Component {
     fn get_id() -> ComponentID;
+    fn add_hook(&mut self, current_entity: Entity, game_state: &mut GameState) {}
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -67,6 +70,7 @@ pub struct EntitySystem {
     pub entity_generations: HashMap<EntityID, usize>,
     pub free_entities: Vec<EntityID>,
     pub components: HashMap<ComponentID, Box<dyn ComponentVec>>,
+    dirty_flag: AtomicBool,
 }
 
 impl EntitySystem {
@@ -77,7 +81,17 @@ impl EntitySystem {
             components: HashMap::new(),
             entity_generations: HashMap::new(),
             free_entities: vec![],
+            dirty_flag: AtomicBool::new(true),
         }
+    }
+
+    pub fn dirty(&self) -> bool {
+        self.dirty_flag.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn clear_dirty(&self) {
+        self.dirty_flag
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn gen_entity(&mut self) -> Entity {
@@ -101,6 +115,8 @@ impl EntitySystem {
             }
         };
         self.entity_generations.insert(e.id, e.generation);
+        self.dirty_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         e
     }
 
@@ -114,6 +130,8 @@ impl EntitySystem {
             component_list.remove_entity_col(entity.id);
         }
         self.free_entities.push(entity.id);
+        self.dirty_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn add_component<T: Component + 'static>(&mut self, entity: Entity, c: T) {
@@ -136,6 +154,8 @@ impl EntitySystem {
             self.components
                 .insert(T::get_id(), Box::new(RefCell::new(h)));
         }
+        self.dirty_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     // Returns true if an asset unload cycle is needed after deleting this component
@@ -148,6 +168,8 @@ impl EntitySystem {
         if let Some(component_vec) = self.components.get_mut(&T::get_id()) {
             component_vec.remove_entity_col(entity.id);
         }
+        self.dirty_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         T::get_id() == ModelComponent::get_id()
     }
 
@@ -157,14 +179,14 @@ impl EntitySystem {
             return None;
         }
 
-        let val = Ref::map(self.get_component_vec::<T>(), |vec: &Vec<Option<T>>| {
-            &vec[entity.id]
-        });
-        if val.is_some() {
-            Some(Ref::map(val, |x| x.as_ref().unwrap()))
-        } else {
-            None
-        }
+        self.get_component_vec::<T>().and_then(|v| {
+            let val = Ref::map(v, |vec: &Vec<Option<T>>| &vec[entity.id]);
+            if val.is_some() {
+                Some(Ref::map(val, |x| x.as_ref().unwrap()))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn get_component_mut<T: Component + 'static>(&self, entity: Entity) -> Option<RefMut<T>> {
@@ -173,15 +195,16 @@ impl EntitySystem {
             return None;
         }
 
-        let val = RefMut::map(
-            self.get_component_vec_mut::<T>(),
-            |vec: &mut Vec<Option<T>>| &mut vec[entity.id],
-        );
-        if val.is_some() {
-            Some(RefMut::map(val, |x| x.as_mut().unwrap()))
-        } else {
-            None
-        }
+        self.dirty_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.get_component_vec_mut::<T>().and_then(|v| {
+            let val = RefMut::map(v, |vec: &mut Vec<Option<T>>| &mut vec[entity.id]);
+            if val.is_some() {
+                Some(RefMut::map(val, |x| x.as_mut().unwrap()))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn get_current_entity_from_id(&self, eid: EntityID) -> Option<Entity> {
@@ -195,40 +218,24 @@ impl EntitySystem {
         }
     }
 
-    pub fn get_component_vec<T: Component + 'static>(&self) -> Ref<Vec<Option<T>>> {
-        self.components
-            .get(T::get_id())
-            .map(|x| {
-                x.as_any()
-                    .downcast_ref::<ComponentVecConcrete<T>>()
-                    .expect("Incorrect downcast of component vector to type!")
-                    .borrow()
-            })
-            .expect(
-                format!(
-                    "Tried to get nonexistant component vector {:?}",
-                    T::get_id()
-                )
-                .as_str(),
-            )
+    pub fn get_component_vec<T: Component + 'static>(&self) -> Option<Ref<Vec<Option<T>>>> {
+        self.components.get(T::get_id()).map(|x| {
+            x.as_any()
+                .downcast_ref::<ComponentVecConcrete<T>>()
+                .expect("Incorrect downcast of component vector to type!")
+                .borrow()
+        })
     }
 
-    pub fn get_component_vec_mut<T: Component + 'static>(&self) -> RefMut<Vec<Option<T>>> {
-        self.components
-            .get(T::get_id())
-            .map(|x| {
-                x.as_any()
-                    .downcast_ref::<ComponentVecConcrete<T>>()
-                    .expect("Incorrect downcast of component vector to type!")
-                    .borrow_mut()
-            })
-            .expect(
-                format!(
-                    "Tried to get nonexistant component vector {:?}",
-                    T::get_id()
-                )
-                .as_str(),
-            )
+    pub fn get_component_vec_mut<T: Component + 'static>(&self) -> Option<RefMut<Vec<Option<T>>>> {
+        self.dirty_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.components.get(T::get_id()).map(|x| {
+            x.as_any()
+                .downcast_ref::<ComponentVecConcrete<T>>()
+                .expect("Incorrect downcast of component vector to type!")
+                .borrow_mut()
+        })
     }
 
     pub fn get_with_component<'a, T: Component + 'static>(

@@ -29,8 +29,6 @@ impl Transform {
 
 #[derive(ComponentId)]
 pub struct TransformComponent {
-    pub depth: usize,
-    pub parent: Option<Entity>,
     pub transform: Transform,
     /// Whether the rotating object behaves as if it is attached to the "ground"
     /// (original XZ plane) so horizontal rotations are always relative to that
@@ -47,27 +45,7 @@ impl TransformComponent {
         Self {
             transform,
             grounded,
-            depth: 0,
-            parent: None,
             dirty_flag: true,
-        }
-    }
-
-    pub fn new_rel_parent(
-        rot: glam::Vec3,
-        trans: glam::Vec3,
-        grounded: bool,
-        parent: Entity,
-        parent_depth: usize,
-    ) -> Self {
-        let rot = glam::Quat::from_euler(glam::EulerRot::XYZ, rot.x, rot.y, rot.z).normalize();
-        let transform = Transform { trans, rot };
-        Self {
-            transform,
-            grounded,
-            parent: Some(parent),
-            depth: parent_depth + 1,
-            dirty_flag: false,
         }
     }
 

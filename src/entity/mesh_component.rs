@@ -673,8 +673,20 @@ impl Mesh {
     }
 }
 
-#[derive(ComponentId)]
 pub struct ModelComponent {
     pub path: String,
     pub shader_program: usize,
+}
+
+impl Component for ModelComponent {
+    fn get_id() -> ComponentID {
+        "ModelComponent"
+    }
+    fn add_hook(
+        &mut self,
+        current_entity: Entity,
+        game_state: &mut crate::update_thread::GameState,
+    ) {
+        game_state.load_model_for(current_entity, self)
+    }
 }

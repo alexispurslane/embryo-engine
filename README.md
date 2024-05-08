@@ -74,7 +74,6 @@ useful to have such a document so others can get a sense for what I'm going for.
 - [x] HDR rendering, fairly advanced tonemapping
 - [x] Font rendering (not quite good, but renders any TTF you want)
 - [x] Transform hierarchies
-> **NOTE**: the API for transform hierarchies right now is *awful*
 - [ ] Basic UI elements
 - [ ] Shadows
 - [ ] Bloom and fog

@@ -17,7 +17,7 @@ pub struct Attenuation {
     pub quadratic: f32,
 }
 
-#[derive(ComponentId, Clone)]
+#[derive(Clone)]
 pub enum LightComponent {
     Ambient {
         ambient: glam::Vec3,
@@ -38,4 +38,13 @@ pub enum LightComponent {
         fade_exponent: f32,
         attenuation: Attenuation,
     },
+}
+
+impl Component for LightComponent {
+    fn get_id() -> ComponentID {
+        "LightComponent"
+    }
+    fn add_hook(&mut self, current_entity: Entity, game_state: &mut GameState) {
+        game_state.register_light(current_entity)
+    }
 }

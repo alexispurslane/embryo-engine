@@ -1,23 +1,53 @@
    Compiling embryo v0.1.0 (/var/home/alexispurslane/Development/embryo-engine)
-error[E0308]: mismatched types
-   --> src/update_thread.rs:251:73
+warning: value assigned to `avg_fps` is never read
+   --> src/render_thread.rs:302:17
     |
-251 |                     if let Some(tc) = &mut item.get_mut(0).and_then(|x| x) {
-    |                                                                         ^ expected `Option<_>`, found `&mut Option<TransformComponent>`
+302 |         let mut avg_fps = 144.0;
+    |                 ^^^^^^^
     |
-    = note:           expected enum `std::option::Option<_>`
-            found mutable reference `&mut std::option::Option<TransformComponent>`
-help: try wrapping the expression in `Some`
-    |
-251 |                     if let Some(tc) = &mut item.get_mut(0).and_then(|x| Some(x)) {
-    |                                                                         +++++ +
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` on by default
 
-error[E0609]: no field `parent` on type `&mut _`
-   --> src/update_thread.rs:252:50
+warning: variable does not need to be mutable
+   --> src/resource_manager.rs:202:17
     |
-252 |                         if let Some(parent) = tc.parent.and_then(|p_ref| {
-    |                                                  ^^^^^^ unknown field
+202 |             let mut model = Model::from_gltf(gltf).expect("Unable to load model");
+    |                 ----^^^^^
+    |                 |
+    |                 help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
 
-Some errors have detailed explanations: E0308, E0609.
-For more information about an error, try `rustc --explain E0308`.
-error: could not compile `embryo` (bin "embryo") due to 2 previous errors
+error[E0502]: cannot borrow `self.entities` as immutable because it is also borrowed as mutable
+   --> src/update_thread.rs:250:31
+    |
+246 |                       let mut tcs = self
+    |  ___________________________________-
+247 | |                         .entities
+    | |_________________________________- mutable borrow occurs here
+...
+250 |                       let hcs = self.entities.get_component_vec::<HierarchyComponent>();
+    |                                 ^^^^^^^^^^^^^ immutable borrow occurs here
+251 |                       for eid in 0..tcs.len() {
+    |                                     --- mutable borrow later used here
+
+error[E0502]: cannot borrow `self.entities` as immutable because it is also borrowed as mutable
+   --> src/update_thread.rs:260:63
+    |
+246 |                       let mut tcs = self
+    |  ___________________________________-
+247 | |                         .entities
+    | |_________________________________- mutable borrow occurs here
+...
+252 |                           let (a, b) = tcs.split_at_mut(eid);
+    |                                        --- mutable borrow later used here
+...
+260 |                               if let Some(parent) = hc.and_then(|hc| {
+    |                                                                 ^^^^ immutable borrow occurs here
+...
+269 |                                           self.entities
+    |                                           ------------- second borrow occurs due to use of `self.entities` in closure
+
+For more information about this error, try `rustc --explain E0502`.
+warning: `embryo` (bin "embryo") generated 2 warnings
+error: could not compile `embryo` (bin "embryo") due to 2 previous errors; 2 warnings emitted
