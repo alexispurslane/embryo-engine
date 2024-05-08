@@ -72,7 +72,10 @@ useful to have such a document so others can get a sense for what I'm going for.
 - [x] Transforms, Models, Lights, and Cameras are all components with tunable parameters
 - [x] Camera pulls position from transform component on same entity
 - [x] HDR rendering, fairly advanced tonemapping
-- [ ] Text and UI elements (imGUI doesn't work with the new threading architecture)
+- [x] Font rendering (not quite good, but renders any TTF you want)
+- [x] Transform hierarchies
+> **NOTE**: the API for transform hierarchies right now is *awful*
+- [ ] Basic UI elements
 - [ ] Shadows
 - [ ] Bloom and fog
 - [ ] Normal maps
@@ -85,7 +88,6 @@ useful to have such a document so others can get a sense for what I'm going for.
 - [ ] Transparency
 - [ ] Caching
 - [ ] Particle effects
-- [ ] Transform hierarchies
 
 ### General architecture
 

@@ -21,6 +21,7 @@ pub mod light_component;
 pub mod mesh_component;
 pub mod terrain_component;
 pub mod transform_component;
+pub mod ui_component;
 
 pub type ComponentID = &'static str;
 pub type EntityID = usize;
@@ -63,7 +64,7 @@ impl<T: Component + 'static> ComponentVec for ComponentVecConcrete<T> {
 pub struct EntitySystem {
     pub entity_count: EntityID,
     pub current_generation: usize,
-    pub current_entity_generations: HashMap<EntityID, usize>,
+    pub entity_generations: HashMap<EntityID, usize>,
     pub free_entities: Vec<EntityID>,
     pub components: HashMap<ComponentID, Box<dyn ComponentVec>>,
 }
@@ -74,7 +75,7 @@ impl EntitySystem {
             current_generation: 0,
             entity_count: 0,
             components: HashMap::new(),
-            current_entity_generations: HashMap::new(),
+            entity_generations: HashMap::new(),
             free_entities: vec![],
         }
     }
@@ -99,12 +100,12 @@ impl EntitySystem {
                 generation: self.current_generation,
             }
         };
-        self.current_entity_generations.insert(e.id, e.generation);
+        self.entity_generations.insert(e.id, e.generation);
         e
     }
 
     pub fn delete_entity(&mut self, entity: Entity) {
-        if entity.generation != self.current_entity_generations[&entity.id] {
+        if entity.generation != self.entity_generations[&entity.id] {
             println!("WARNING: Tried to use recycled entity ID to refer to old entity");
             return;
         }
@@ -116,7 +117,7 @@ impl EntitySystem {
     }
 
     pub fn add_component<T: Component + 'static>(&mut self, entity: Entity, c: T) {
-        if entity.generation != self.current_entity_generations[&entity.id] {
+        if entity.generation != self.entity_generations[&entity.id] {
             println!("WARNING: Tried to use recycled entity ID to refer to old entity");
             return;
         }
@@ -139,7 +140,7 @@ impl EntitySystem {
 
     // Returns true if an asset unload cycle is needed after deleting this component
     pub fn remove_component<T: Component + 'static>(&mut self, entity: Entity) -> bool {
-        if entity.generation != self.current_entity_generations[&entity.id] {
+        if entity.generation != self.entity_generations[&entity.id] {
             println!("WARNING: Tried to use recycled entity ID to refer to old entity");
             return false;
         }
@@ -151,7 +152,7 @@ impl EntitySystem {
     }
 
     pub fn get_component<T: Component + 'static>(&self, entity: Entity) -> Option<Ref<T>> {
-        if entity.generation != self.current_entity_generations[&entity.id] {
+        if entity.generation != self.entity_generations[&entity.id] {
             println!("WARNING: Tried to use recycled entity ID to refer to old entity in a situation where a result is required");
             return None;
         }
@@ -167,7 +168,7 @@ impl EntitySystem {
     }
 
     pub fn get_component_mut<T: Component + 'static>(&self, entity: Entity) -> Option<RefMut<T>> {
-        if entity.generation != self.current_entity_generations[&entity.id] {
+        if entity.generation != self.entity_generations[&entity.id] {
             println!("WARNING: Tried to use recycled entity ID to refer to old entity in a situation where a result is required");
             return None;
         }
@@ -185,7 +186,7 @@ impl EntitySystem {
 
     pub fn get_current_entity_from_id(&self, eid: EntityID) -> Option<Entity> {
         if !self.free_entities.contains(&eid) {
-            self.current_entity_generations.get(&eid).map(|gen| Entity {
+            self.entity_generations.get(&eid).map(|gen| Entity {
                 id: eid,
                 generation: *gen,
             })

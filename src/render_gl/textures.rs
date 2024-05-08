@@ -18,10 +18,10 @@ use super::objects::FramebufferAttachment;
 pub struct TextureParameters {
     pub texture_type: gl::types::GLenum,
     pub color_attachment_point: Option<gl::types::GLenum>,
-    pub wrap_s: gl::types::GLint,
-    pub wrap_t: gl::types::GLint,
-    pub min_filter: gl::types::GLint,
-    pub mag_filter: gl::types::GLint,
+    pub wrap_s: gl::types::GLenum,
+    pub wrap_t: gl::types::GLenum,
+    pub min_filter: gl::types::GLenum,
+    pub mag_filter: gl::types::GLenum,
     pub mips: gl::types::GLint,
 }
 
@@ -31,10 +31,10 @@ impl Default for TextureParameters {
             texture_type: gl::TEXTURE_2D,
             color_attachment_point: None,
             mips: 4,
-            wrap_s: gl::REPEAT as gl::types::GLint,
-            wrap_t: gl::REPEAT as gl::types::GLint,
-            min_filter: gl::LINEAR_MIPMAP_LINEAR as gl::types::GLint,
-            mag_filter: gl::LINEAR as gl::types::GLint,
+            wrap_s: gl::REPEAT,
+            wrap_t: gl::REPEAT,
+            min_filter: gl::LINEAR_MIPMAP_LINEAR,
+            mag_filter: gl::LINEAR,
         }
     }
 }
@@ -43,6 +43,24 @@ pub trait ColorDepth {
     fn get_gl_type() -> gl::types::GLenum;
     fn get_pixel_format() -> gl::types::GLenum;
     fn get_sized_internal_format() -> gl::types::GLenum;
+}
+
+pub struct Red(pub u8);
+impl From<u8> for Red {
+    fn from(value: u8) -> Self {
+        Self(value)
+    }
+}
+impl ColorDepth for Red {
+    fn get_gl_type() -> gl::types::GLenum {
+        gl::UNSIGNED_BYTE
+    }
+    fn get_pixel_format() -> gl::types::GLenum {
+        gl::RED
+    }
+    fn get_sized_internal_format() -> gl::types::GLenum {
+        gl::R8
+    }
 }
 
 pub type RGB8 = u8;
@@ -224,14 +242,26 @@ impl<T: ColorDepth> Texture<T> {
         depth: usize,
     ) {
         unsafe {
-            self.gl
-                .TextureParameteri(self.id, gl::TEXTURE_WRAP_S, self.parameters.wrap_s);
-            self.gl
-                .TextureParameteri(self.id, gl::TEXTURE_WRAP_T, self.parameters.wrap_t);
-            self.gl
-                .TextureParameteri(self.id, gl::TEXTURE_MIN_FILTER, self.parameters.min_filter);
-            self.gl
-                .TextureParameteri(self.id, gl::TEXTURE_MAG_FILTER, self.parameters.mag_filter);
+            self.gl.TextureParameteri(
+                self.id,
+                gl::TEXTURE_WRAP_S,
+                self.parameters.wrap_s as gl::types::GLint,
+            );
+            self.gl.TextureParameteri(
+                self.id,
+                gl::TEXTURE_WRAP_T,
+                self.parameters.wrap_t as gl::types::GLint,
+            );
+            self.gl.TextureParameteri(
+                self.id,
+                gl::TEXTURE_MIN_FILTER,
+                self.parameters.min_filter as gl::types::GLint,
+            );
+            self.gl.TextureParameteri(
+                self.id,
+                gl::TEXTURE_MAG_FILTER,
+                self.parameters.mag_filter as gl::types::GLint,
+            );
             match self.parameters.texture_type {
                 gl::TEXTURE_1D => {
                     self.gl.TextureSubImage1D(

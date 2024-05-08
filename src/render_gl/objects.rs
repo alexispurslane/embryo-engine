@@ -465,8 +465,6 @@ impl FramebufferObject {
                 self.gl.BindFramebuffer(bp, 0);
             }
             self.bind_point = None;
-        } else {
-            println!("WARNING: trying to unbind framebuffer that was not bound!");
         }
     }
 

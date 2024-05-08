@@ -1,8 +1,10 @@
 use crate::{
     dead_drop::DeadDrop,
     entity::{
-        light_component::LightComponent, mesh_component::Model,
-        transform_component::TransformComponent, Entity, EntityID,
+        light_component::LightComponent,
+        mesh_component::Model,
+        transform_component::{Transform, TransformComponent},
+        Entity, EntityID,
     },
     render_gl::{
         data::{Cvec3, InstanceTransformVertex, VertexPos, VertexTex},
@@ -17,16 +19,18 @@ use crate::{
     },
     resource_manager::ResourceManager,
     systems,
+    text::FontRenderer,
     update_thread::GameStateEvent,
     utils, CONFIG,
 };
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use gl::Gl;
+use rayon::{iter::IntoParallelRefIterator, slice::ParallelSliceMut};
 use std::{
     any::Any,
     collections::HashMap,
     ffi::{CStr, CString},
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
 };
 
 use crate::SendableGl;
@@ -35,47 +39,47 @@ use glam::Vec4Swizzles;
 use sdl2::{event::Event, video::GLContext};
 
 pub struct RenderWorldState {
-    pub camera: Option<RenderCameraState>,
-    pub entity_generations: Option<HashMap<EntityID, usize>>,
-    pub entity_transforms: Option<Box<Vec<Option<glam::Mat4>>>>,
-    pub lights: Option<Box<Vec<ShaderLight>>>,
+    pub active_camera: Option<RenderCameraState>,
+    pub entity_generations: HashMap<EntityID, usize>,
+    pub lights: Vec<ShaderLight>,
+    pub entity_transforms: HashMap<EntityID, glam::Mat4>,
 }
 
+#[derive(Clone)]
 pub struct RenderCameraState {
     pub view: glam::Mat4,
     pub proj: glam::Mat4,
 }
 
-const DEFAULT_SHADER: usize = 0;
-const METAL_REFLECTIVE_SHADER: usize = 1;
-const LUMINANCE_SHADER: usize = 2;
-const LUMINANCE_SHADER2: usize = 3;
-const TONEMAP_SHADER: usize = 4;
-const GAMMA_SHADER: usize = 5;
-const GAUSSIAN_SHADER: usize = 6;
-const BLOOM_SHADER: usize = 7;
-const DOF_SHADER: usize = 8;
-const LIGHT_SHADER: usize = 9;
-const SIMPLE_PROJECT_SHADER: usize = 10;
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Shaders {
+    Default,
+    MetalReflective,
+    LuminanceFreq,
+    LuminanceAvg,
+    Tonemap,
+    Gamma,
+    Gaussian,
+    Bloom,
+    DepthOfField,
+    Light,
+    SimpleProject,
+    Font,
+}
 
 pub struct RendererState {
     gl: Gl,
 
+    pub render_world_state: RenderWorldState,
     pub resource_manager: ResourceManager,
 
     pub viewport_size: (u32, u32),
 
-    pub camera: Option<RenderCameraState>,
-
     pub models: HashMap<String, Model>,
 
-    pub shader_programs: HashMap<usize, Program>,
-
-    pub entity_generations: HashMap<EntityID, usize>,
-    pub entity_transforms: Box<Vec<Option<glam::Mat4>>>,
+    pub shader_programs: HashMap<Shaders, Program>,
 
     pub light_ubo: BufferObject<ShaderLight>,
-    pub lights: Box<Vec<ShaderLight>>,
     pub light_sphere_vao: VertexArrayObject,
 
     pub luminance_avg: Texture<R16F>,
@@ -86,6 +90,8 @@ pub struct RendererState {
     pub hdr_framebuffer: FramebufferObject,
 
     pub sdr_vao: VertexArrayObject,
+
+    pub ui_font: FontRenderer,
 }
 
 impl RendererState {
@@ -102,16 +108,19 @@ impl RendererState {
             height as usize,
             1,
         );
+        let lib = freetype::Library::init().unwrap();
         RendererState {
             gl: gl.clone(),
             resource_manager,
+            render_world_state: RenderWorldState {
+                active_camera: None,
+                entity_generations: HashMap::new(),
+                lights: Vec::new(),
+                entity_transforms: HashMap::new(),
+            },
             viewport_size: (width, height),
-            camera: None,
             shader_programs: HashMap::new(),
             models: HashMap::new(),
-            entity_transforms: Box::new(vec![]),
-            entity_generations: HashMap::new(),
-            lights: Box::new(vec![]),
             light_ubo: BufferObject::new(&gl, gl::UNIFORM_BUFFER, gl::STREAM_DRAW, 1),
             g_buffer: {
                 let mut fbo = FramebufferObject::new(&gl);
@@ -239,6 +248,8 @@ impl RendererState {
                 std::mem::forget(vbo);
                 vao
             },
+            ui_font: FontRenderer::new("Teko", &gl, lib, 128 as char, (width, height)),
+
             luminance_avg: Texture::new_allocated(
                 &gl,
                 TextureParameters {
@@ -259,80 +270,26 @@ impl RendererState {
         }
     }
 
-    pub fn shader(&mut self, shader_name: usize, shaders: &[&'static str]) {
-        let shaders = shaders
-            .into_iter()
-            .map(|file| {
-                trace!("Loading shader './data/shaders/{file}'");
-                let shader_type = match file.rsplit_once('.').unwrap().1 {
-                    "comp" => gl::COMPUTE_SHADER,
-                    "frag" => gl::FRAGMENT_SHADER,
-                    "vert" => gl::VERTEX_SHADER,
-                    e => panic!("Unknown shader extension {e}, I don't know what to do with this."),
-                };
-                shaders::Shader::from_file(&self.gl, &format!("./data/shaders/{file}"), shader_type)
-                    .unwrap_or_else(|e| {
-                        error!(
-                            "Shader compilation error: could not compile shader '{file}', got errors:\n{e}"
-                        );
-                        std::process::exit(1);
-                    })
-            })
-            .collect::<Vec<_>>();
-        trace!(
-            "Calling shader program link function with {} shaders",
-            shaders.len()
-        );
+    pub fn shader(&mut self, shader_name: Shaders, shaders: &[&'static str]) {
         self.shader_programs.insert(
             shader_name,
-            Program::from_shaders(&self.gl, &shaders).unwrap(),
+            Program::new_with_shader_files(&self.gl, shaders),
         );
     }
 
     pub fn load_shaders(&mut self) {
-        self.shader(DEFAULT_SHADER, &["camera.vert", "material.frag"]);
-        self.shader(SIMPLE_PROJECT_SHADER, &["light_camera.vert"]);
-        self.shader(TONEMAP_SHADER, &["passthrough.vert", "hdr.frag"]);
-        self.shader(LUMINANCE_SHADER, &["luminance.comp"]);
-        self.shader(LUMINANCE_SHADER2, &["average.comp"]);
-        self.shader(LIGHT_SHADER, &["light_camera.vert", "light.frag"]);
-    }
-
-    pub fn merge_changes(&mut self, new_render_state: RenderWorldState) {
-        if let Some(new_cam) = new_render_state.camera {
-            self.camera = Some(new_cam);
-        }
-        if let Some(new_gens) = new_render_state.entity_generations {
-            self.entity_generations = new_gens;
-        }
-        if let Some(new_trans) = new_render_state.entity_transforms {
-            self.entity_transforms = new_trans;
-        }
-        if let Some(new_lights) = new_render_state.lights {
-            self.lights = new_lights;
-        }
-    }
-
-    pub fn get_entity_transform<'a>(
-        entity_generations: &'a HashMap<EntityID, usize>,
-        entity_transforms: &'a Vec<Option<glam::Mat4>>,
-        e: Entity,
-    ) -> Option<&'a glam::Mat4> {
-        if entity_generations
-            .get(&e.id)
-            .filter(|gen| **gen == e.generation)
-            .is_some()
-        {
-            entity_transforms.get(e.id).and_then(|x| x.as_ref())
-        } else {
-            entity_transforms.get(e.id).and_then(|x| x.as_ref())
-        }
+        self.shader(Shaders::Default, &["camera.vert", "material.frag"]);
+        self.shader(Shaders::SimpleProject, &["light_camera.vert"]);
+        self.shader(Shaders::Tonemap, &["passthrough.vert", "hdr.frag"]);
+        self.shader(Shaders::LuminanceFreq, &["luminance.comp"]);
+        self.shader(Shaders::LuminanceAvg, &["average.comp"]);
+        self.shader(Shaders::Light, &["light_camera.vert", "light.frag"]);
     }
 
     pub fn render_loop(
         &mut self,
 
-        render_state_dead_drop: DeadDrop<RenderWorldState>,
+        rws_receiver: DeadDrop<RenderWorldState>,
         event_sender: Sender<GameStateEvent>,
         swap_buffers: impl Fn(),
 
@@ -342,6 +299,7 @@ impl RendererState {
         let mut last_time = start_time.elapsed().as_millis();
         let mut dt;
         let mut avg_dt = 0.0;
+        let mut avg_fps = 144.0;
 
         while running.load(std::sync::atomic::Ordering::SeqCst) {
             // Track time
@@ -351,10 +309,10 @@ impl RendererState {
             last_time = time;
             avg_dt = (avg_dt + dt as f32) / 2.0;
 
-            println!("FPS: {}", 1000.0 / avg_dt);
+            avg_fps = 1000.0 / avg_dt;
 
-            if let Some(nrs) = render_state_dead_drop.recv() {
-                self.merge_changes(nrs);
+            if let Some(new_render_state) = rws_receiver.recv() {
+                self.render_world_state = new_render_state;
             }
 
             self.resource_manager
@@ -369,6 +327,18 @@ impl RendererState {
             // Render HDR buffer to screen with tone mapping, gamma correction, and auto exposure
             self.render_hdr_to_sdr(avg_dt, dt as f32);
 
+            self.ui_font.render_lines(
+                format!(
+                    "FPS: {:03}\nEntities in worldspace: {}",
+                    avg_fps.round(),
+                    self.render_world_state.entity_transforms.len()
+                ),
+                (20.0, 20.0),
+                12.0,
+                (1.0, 1.0, 1.0),
+                18.0,
+            );
+
             swap_buffers();
         }
     }
@@ -376,7 +346,7 @@ impl RendererState {
     /// Render all the models in the world to the G-buffer. This just composits
     /// together all the info the next step needs to actually render a frame.
     pub fn render_to_g(&mut self) {
-        if let Some(camera) = self.camera.as_ref() {
+        if let Some(camera) = self.render_world_state.active_camera.as_ref() {
             // Set up G-buffer for world mesh drawing
             self.g_buffer.bind_to(gl::DRAW_FRAMEBUFFER);
             self.g_buffer.draw_to_buffers(&[
@@ -395,7 +365,7 @@ impl RendererState {
             clear_screen(&self.gl);
 
             // Use the default shader
-            let program = &self.shader_programs[&DEFAULT_SHADER];
+            let program = &self.shader_programs[&Shaders::Default];
             program.set_used();
 
             // Prepare the shader's constant uniforms based on the camera and the lights.
@@ -403,8 +373,8 @@ impl RendererState {
 
             // Loop through each model and render all instances of it, in batches.
             let models = &mut self.models;
-            let egen = &self.entity_generations;
-            let etrans = &self.entity_transforms;
+            let egen = &self.render_world_state.entity_generations;
+            let etrans = &self.render_world_state.entity_transforms;
             for (path, model) in models.iter_mut() {
                 // Create the list of transforms of all the instances of this model. We
                 // will pull from this for all batches
@@ -412,7 +382,7 @@ impl RendererState {
                 .entities
                 .iter()
                 .map(|entity| {
-                    Self::get_entity_transform(egen, etrans, *entity)
+                    utils::get_entity_transform(egen, etrans, *entity)
                         .expect("Tried to render model for an entity that either doesn't have a transform component, or has been recycled.")
                 })
                 .map(|mat| InstanceTransformVertex::new(mat.to_cols_array()))
@@ -495,7 +465,7 @@ impl RendererState {
     /// determine what the light should actually illuminate. This produces the
     /// actual frame.
     pub fn render_g_to_hdr(&mut self) {
-        if let Some(camera) = self.camera.as_ref() {
+        if let Some(camera) = self.render_world_state.active_camera.as_ref() {
             self.hdr_framebuffer.bind_to(gl::DRAW_FRAMEBUFFER);
             // We don't want to clear the depth buffer because this framebuffer
             // and the g buffer share a depth buffer so that we can use the
@@ -512,11 +482,11 @@ impl RendererState {
             // render the light, and we don't have the lights grouped by type,
             // so we can't use instancing. TODO: Actually group lights by type
             // so we can use instancing on lights too
-            for light in self.lights.iter() {
+            for light in self.render_world_state.lights.iter() {
                 // This information is shared between the stencil and drawing phases
                 let light_model_matrix = light.light_volume_model_matrix();
 
-                let program = &self.shader_programs[&SIMPLE_PROJECT_SHADER];
+                let program = &self.shader_programs[&Shaders::SimpleProject];
                 program.set_used();
                 camera_prepare_shader(&program, camera);
 
@@ -590,7 +560,7 @@ impl RendererState {
                 // by the light, and nothing else.
                 self.hdr_framebuffer.bind_to(gl::DRAW_FRAMEBUFFER);
 
-                let program = &self.shader_programs[&LIGHT_SHADER];
+                let program = &self.shader_programs[&Shaders::Light];
                 program.set_used();
                 camera_prepare_shader(&program, camera);
 
@@ -700,9 +670,9 @@ impl RendererState {
         // First, we need to get the average luminance of the HDR buffer.
         // We'll use two compute shaders for that
         unsafe {
-            self.shader_programs[&LUMINANCE_SHADER].set_used();
+            self.shader_programs[&Shaders::LuminanceFreq].set_used();
 
-            self.shader_programs[&LUMINANCE_SHADER].set_uniform_4f(
+            self.shader_programs[&Shaders::LuminanceFreq].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [
                     min_log_luminance,
@@ -725,9 +695,9 @@ impl RendererState {
                 1,
             );
 
-            self.shader_programs[&LUMINANCE_SHADER2].set_used();
+            self.shader_programs[&Shaders::LuminanceAvg].set_used();
 
-            self.shader_programs[&LUMINANCE_SHADER2].set_uniform_4f(
+            self.shader_programs[&Shaders::LuminanceAvg].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [
                     min_log_luminance,
@@ -753,8 +723,8 @@ impl RendererState {
 
             self.gl.DispatchCompute(1, 1, 1);
 
-            self.shader_programs[&TONEMAP_SHADER].set_used();
-            self.shader_programs[&TONEMAP_SHADER].set_uniform_4f(
+            self.shader_programs[&Shaders::Tonemap].set_used();
+            self.shader_programs[&Shaders::Tonemap].set_uniform_4f(
                 &CString::new("params").unwrap(),
                 [4.9, 0.0, 0.0, 0.0].into(),
             );

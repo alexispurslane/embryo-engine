@@ -86,15 +86,21 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn new_with_shader_files(
-        gl: &Gl,
-        shaders: &[(gl::types::GLenum, &'static str)],
-    ) -> Program {
+    pub fn new_with_shader_files(gl: &Gl, shaders: &[&'static str]) -> Program {
         let shaders = shaders
             .iter()
-            .map(|(t, file)| {
-                Shader::from_file(gl, file, *t).unwrap_or_else(|e| {
-                    panic!("Could not compile {:?} shader. Errors:\n{}", file, e)
+            .map(|file| {
+                let shader_type = match file.rsplit_once('.').unwrap().1 {
+                    "comp" => gl::COMPUTE_SHADER,
+                    "frag" => gl::FRAGMENT_SHADER,
+                    "vert" => gl::VERTEX_SHADER,
+                    e => panic!("Unknown shader extension {e}, I don't know what to do with this."),
+                };
+                Shader::from_file(gl, &format!("./data/shaders/{file}"), shader_type).unwrap_or_else(|e| {
+                    error!(
+                        "Shader compilation error: could not compile shader '{file}', got errors:\n{e}"
+                    );
+                    std::process::exit(1);
                 })
             })
             .collect::<Vec<_>>();

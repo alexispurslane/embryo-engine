@@ -29,12 +29,13 @@ impl Transform {
 
 #[derive(ComponentId)]
 pub struct TransformComponent {
+    pub depth: usize,
+    pub parent: Option<Entity>,
     pub transform: Transform,
     /// Whether the rotating object behaves as if it is attached to the "ground"
     /// (original XZ plane) so horizontal rotations are always relative to that
     /// original XZ plane while vertical rotations are relative, or if all
     /// rotations are relative. Useful for cameras.
-    matrix: glam::Mat4,
     pub grounded: bool,
     pub dirty_flag: bool,
 }
@@ -46,7 +47,26 @@ impl TransformComponent {
         Self {
             transform,
             grounded,
-            matrix: transform.to_matrix(),
+            depth: 0,
+            parent: None,
+            dirty_flag: true,
+        }
+    }
+
+    pub fn new_rel_parent(
+        rot: glam::Vec3,
+        trans: glam::Vec3,
+        grounded: bool,
+        parent: Entity,
+        parent_depth: usize,
+    ) -> Self {
+        let rot = glam::Quat::from_euler(glam::EulerRot::XYZ, rot.x, rot.y, rot.z).normalize();
+        let transform = Transform { trans, rot };
+        Self {
+            transform,
+            grounded,
+            parent: Some(parent),
+            depth: parent_depth + 1,
             dirty_flag: false,
         }
     }
@@ -83,12 +103,5 @@ impl TransformComponent {
         let Transform { trans: pos, rot } = self.transform;
         let direction = rot * glam::Vec3::Z;
         glam::Mat4::look_to_rh(pos, direction, rot * glam::Vec3::Y)
-    }
-
-    pub fn get_matrix(&mut self) -> glam::Mat4 {
-        if self.dirty_flag {
-            self.matrix = self.transform.to_matrix();
-        }
-        self.matrix
     }
 }

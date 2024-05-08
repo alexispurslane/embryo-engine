@@ -22,8 +22,9 @@ extern crate log;
 #[macro_use]
 extern crate project_gilgamesh_render_gl_derive as render_gl_derive;
 extern crate crossbeam_channel;
+extern crate freetype;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use entity::EntitySystem;
 use gl::Gl;
 use lazy_static::lazy_static;
@@ -34,7 +35,7 @@ use sdl2::video::GLContext;
 use std::{
     collections::HashMap,
     ops::Deref,
-    sync::{atomic::AtomicBool, Arc, Condvar, Mutex},
+    sync::{atomic::AtomicBool, Arc, Condvar, Mutex, RwLock},
 };
 use update_thread::{GameState, GameStateEvent};
 use utils::config::WindowMode;
@@ -48,6 +49,7 @@ mod render_gl;
 mod render_thread;
 mod resource_manager;
 mod systems;
+mod text;
 mod update_thread;
 mod utils;
 
@@ -161,7 +163,7 @@ pub fn main() {
 
     debug!("OpenGL context created and configured");
 
-    info!("Game window created!");
+    info!("Game window created");
 
     ///////// Initalize game
 
@@ -182,15 +184,15 @@ pub fn main() {
         std::process::exit(1);
     }));
 
-    let render_state_dead_drop = DeadDrop::default();
+    let render_world_state = DeadDrop::default();
     let (event_sender, event_receiver): (Sender<GameStateEvent>, Receiver<GameStateEvent>) =
         unbounded();
 
     {
-        let render_state_dead_drop = render_state_dead_drop.clone();
         let resource_manager = resource_manager.clone();
         let running = running.clone();
         let event_receiver = event_receiver.clone();
+        let render_world_state = render_world_state.clone();
         std::thread::Builder::new()
             .name("update".to_string())
             .spawn(move || {
@@ -201,7 +203,7 @@ pub fn main() {
                     game_state.load_initial_entities();
                     info!("Update thread started");
                     game_state.update_loop(
-                        render_state_dead_drop,
+                        render_world_state,
                         event_receiver,
                         (width, height),
                         running.clone(),
@@ -209,7 +211,6 @@ pub fn main() {
                 }
             });
     }
-
     ////// Render thread
 
     // Now we need to transfer the window's GL context to the render thread, to
@@ -259,7 +260,7 @@ pub fn main() {
                     renderer_state.load_shaders();
                     debug!("Render thread started");
                     renderer_state.render_loop(
-                        render_state_dead_drop,
+                        render_world_state,
                         event_sender,
                         // NOTE: We want to do this with a callback so that the rest
                         // of the render thread has no access to the window
@@ -306,7 +307,6 @@ pub fn main() {
                     } else {
                         "Other"
                     };
-                    trace!("Sending {etype} event to update thread");
                     let _ = event_sender.send(GameStateEvent::SDLEvent(event)).unwrap();
                 }
             }

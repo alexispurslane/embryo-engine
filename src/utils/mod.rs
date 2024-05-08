@@ -6,7 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-use std::{cell::RefMut, ffi::CString};
+use std::{cell::RefMut, collections::HashMap, ffi::CString};
 
 use gl::Gl;
 use glam::Vec4Swizzles;
@@ -16,7 +16,7 @@ use crate::{
         camera_component::CameraComponent,
         light_component::*,
         transform_component::{self, TransformComponent},
-        Entity, EntitySystem,
+        Entity, EntityID, EntitySystem,
     },
     render_gl::{
         objects::{Buffer, BufferObject},
@@ -523,11 +523,19 @@ pub mod primitives {
             VertexPos { pos: [-0.42532268166542053, 0.30901139974594116, 0.8506541848182678].into() },
             VertexPos { pos: [0.16245555877685547, 0.49999526143074036, 0.8506543636322021].into() },
         ];
+
         pub static ref QUAD: Vec<VertexPos> = vec![
             VertexPos {pos: [-1.0, 1.0, 0.0].into(),},
             VertexPos {pos: [-1.0, -1.0, 0.0].into(),},
             VertexPos {pos: [1.0, 1.0, 0.0].into(),},
             VertexPos {pos: [1.0, -1.0, 0.0].into(),},
+        ];
+
+        pub static ref TEXTURED_2D_QUAD: Vec<VertexTex> = vec![
+            VertexTex {pos: [-1.0, 1.0].into(), tex: [0.0, 0.0].into() },
+            VertexTex {pos: [-1.0, -1.0].into(), tex: [0.0, 1.0].into()},
+            VertexTex {pos: [1.0, 1.0].into(), tex: [1.0, 0.0].into()},
+            VertexTex {pos: [1.0, -1.0].into(), tex: [1.0, 1.0].into()},
         ];
     }
 }
@@ -553,5 +561,21 @@ pub mod necronomicon {
 
     pub fn fhtengen<T>(x: &RefCell<RefCell<T>>) -> YogSothoth<T> {
         YogSothoth { inner: x.borrow() }
+    }
+}
+
+pub fn get_entity_transform<'a>(
+    entity_generations: &'a HashMap<EntityID, usize>,
+    entity_transforms: &'a HashMap<EntityID, glam::Mat4>,
+    e: Entity,
+) -> Option<&'a glam::Mat4> {
+    if entity_generations
+        .get(&e.id)
+        .filter(|gen| **gen == e.generation)
+        .is_some()
+    {
+        entity_transforms.get(&e.id)
+    } else {
+        entity_transforms.get(&e.id)
     }
 }

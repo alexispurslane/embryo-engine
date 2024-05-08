@@ -230,7 +230,7 @@ pub struct VertexPos {
 #[repr(C, packed)]
 pub struct VertexTex {
     #[location = 0]
-    pub pos: Cvec3,
+    pub pos: Cvec2,
     #[location = 1]
     pub tex: Cvec2,
 }

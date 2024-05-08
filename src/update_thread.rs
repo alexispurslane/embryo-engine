@@ -7,9 +7,13 @@
  */
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use gltf::scene::Transform;
+use rayon::slice::ParallelSlice;
 use std::{
+    collections::{BinaryHeap, HashMap},
     fmt::Debug,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, RwLock},
+    thread::panicking,
     time::Duration,
 };
 
@@ -17,15 +21,48 @@ use crate::{
     dead_drop::DeadDrop,
     entity::{
         camera_component::CameraComponent, light_component::LightComponent,
-        transform_component::TransformComponent,
+        transform_component::TransformComponent, EntityID,
     },
     events,
     render_thread::{light_component_to_shader_light, RenderCameraState, RenderWorldState},
     resource_manager::ResourceManager,
-    systems, CONFIG,
+    systems, utils, CONFIG,
 };
 
 use crate::entity::{Entity, EntitySystem};
+
+pub struct EntityTransformationUpdate {
+    eid: usize,
+    depth: usize,
+    matrix: glam::Mat4,
+    parent_matrix: Option<glam::Mat4>,
+}
+
+impl Ord for EntityTransformationUpdate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if self.depth < other.depth {
+            std::cmp::Ordering::Greater
+        } else if self.depth == other.depth {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    }
+}
+
+impl PartialOrd for EntityTransformationUpdate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for EntityTransformationUpdate {
+    fn eq(&self, other: &Self) -> bool {
+        self.depth == other.depth && self.matrix == other.matrix && self.eid == other.eid
+    }
+}
+
+impl Eq for EntityTransformationUpdate {}
 
 pub type Direction = glam::Vec3;
 pub type PitchYawRoll = glam::Vec3;
@@ -67,12 +104,14 @@ pub struct GameState {
     command_queue: Vec<SceneCommand>,
     entities: EntitySystem,
     changed_diff: GameStateDiff,
+    entity_transforms: HashMap<EntityID, glam::Mat4>,
 }
 
 impl GameState {
     pub fn new(resource_manager: ResourceManager) -> Self {
         Self {
             resource_manager,
+            entity_transforms: HashMap::new(),
             camera: None,
             command_queue: vec![],
             entities: EntitySystem::new(),
@@ -175,7 +214,7 @@ impl GameState {
 
     pub fn update_loop(
         mut self,
-        render_state_dead_drop: DeadDrop<RenderWorldState>,
+        rws_sender: DeadDrop<RenderWorldState>,
         event_receiver: Receiver<GameStateEvent>,
 
         (width, height): (u32, u32),
@@ -203,6 +242,56 @@ impl GameState {
                 lag -= interval;
             }
 
+            if self.changed_diff.entities_changed {
+                let mut tcs = self.entities.get_component_vec_mut::<TransformComponent>();
+                let mut new_trans = BinaryHeap::new();
+                for eid in 0..tcs.len() {
+                    let (a, b) = tcs.split_at_mut(eid);
+                    let (item, c) = b.split_at_mut(1);
+                    if let Some(tc) = &mut item[0] {
+                        if let Some(parent) = tc.parent.and_then(|p_ref| {
+                            a.get_mut(p_ref.id).or(c.get_mut(p_ref.id)).and_then(|ptc| {
+                                ptc.as_mut().filter(|_| {
+                                    self.entities
+                                        .entity_generations
+                                        .get(&p_ref.id)
+                                        .map(|gen| *gen == p_ref.generation)
+                                        .unwrap_or(false)
+                                })
+                            })
+                        }) {
+                            if tc.dirty_flag || parent.dirty_flag {
+                                new_trans.push(EntityTransformationUpdate {
+                                    depth: tc.depth,
+                                    eid,
+                                    matrix: tc.transform.to_matrix(),
+                                    parent_matrix: Some(parent.transform.to_matrix()),
+                                });
+                            }
+                        } else {
+                            if tc.dirty_flag {
+                                new_trans.push(EntityTransformationUpdate {
+                                    depth: tc.depth,
+                                    eid,
+                                    matrix: tc.transform.to_matrix(),
+                                    parent_matrix: None,
+                                });
+                            }
+                        }
+                    }
+                }
+                for update in new_trans.iter() {
+                    self.entity_transforms.insert(
+                        update.eid,
+                        if let Some(pm) = update.parent_matrix {
+                            update.matrix * pm
+                        } else {
+                            update.matrix
+                        },
+                    );
+                }
+            }
+
             if total_lag > interval {
                 // Catch up with events
                 while let Some(event) = event_receiver.try_iter().next() {
@@ -210,71 +299,39 @@ impl GameState {
                 }
 
                 if self.changed_diff.any_changed() {
-                    let cam = {
-                        if self.changed_diff.camera_changed {
-                            let camera = self.camera.expect("Must have camera");
-                            let cc = self
-                                .entities
-                                .get_component::<CameraComponent>(camera)
-                                .expect("Camera must still exist and have camera component!");
-                            let ct = self
-                                .entities
-                                .get_component::<TransformComponent>(camera)
-                                .expect("Camera must still exist and have transform component!");
+                    let camera = self.camera.expect("Must have camera");
+                    let cc = self
+                        .entities
+                        .get_component::<CameraComponent>(camera)
+                        .expect("Camera must still exist and have camera component!");
+                    let ct = self
+                        .entities
+                        .get_component::<TransformComponent>(camera)
+                        .expect("Camera must still exist and have transform component!");
 
-                            Some(RenderCameraState {
-                                view: ct.point_of_view(),
-                                proj: cc.project(width, height),
+                    rws_sender.send(RenderWorldState {
+                        lights: self
+                            .lights
+                            .iter()
+                            .map(|e| {
+                                let lc = self.entities.get_component::<LightComponent>(*e).unwrap();
+                                let tc = self
+                                    .entities
+                                    .get_component::<TransformComponent>(*e)
+                                    .unwrap();
+                                light_component_to_shader_light(&lc, &tc)
                             })
-                        } else {
-                            None
-                        }
-                    };
-                    let matrices = {
-                        if self.changed_diff.entities_changed {
-                            // We DON'T use the entities_mut() command here
-                            // because if we did, it would lead to a degenerate
-                            // loop of stuff being marked changed every frame
-                            // once the first change happens
-                            Some(
-                                self.entities
-                                    .get_component_vec_mut::<TransformComponent>()
-                                    .iter_mut()
-                                    .map(|opt_tc| opt_tc.as_mut().map(|tc| tc.get_matrix().clone()))
-                                    .collect(),
-                            )
-                        } else {
-                            None
-                        }
-                    };
-                    let lights = {
-                        if self.changed_diff.lights_changed {
-                            Some(
-                                self.lights
-                                    .iter()
-                                    .map(|e| {
-                                        let lc = self
-                                            .entities
-                                            .get_component::<LightComponent>(*e)
-                                            .unwrap();
-                                        let tc = self
-                                            .entities
-                                            .get_component::<TransformComponent>(*e)
-                                            .unwrap();
-                                        light_component_to_shader_light(&lc, &tc)
-                                    })
-                                    .collect(),
-                            )
-                        } else {
-                            None
-                        }
-                    };
-                    render_state_dead_drop.send(RenderWorldState {
-                        camera: cam,
-                        entity_generations: Some(self.entities.current_entity_generations.clone()),
-                        entity_transforms: matrices.map(|x| Box::new(x)),
-                        lights: lights.map(|x| Box::new(x)),
+                            .collect(),
+                        active_camera: Some(RenderCameraState {
+                            view: ct.point_of_view(),
+                            proj: cc.project(width, height),
+                        }),
+                        entity_generations: self.entities.entity_generations.clone(),
+                        entity_transforms: self.entity_transforms.clone(),
                     });
+                    self.changed_diff.camera_changed = false;
+                    self.changed_diff.entities_changed = false;
+                    self.changed_diff.lights_changed = false;
                 }
                 if CONFIG.performance.cap_update_fps {
                     let sleep_time = interval - dt;

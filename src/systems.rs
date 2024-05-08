@@ -30,6 +30,22 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         .entities_mut()
         .add_component(e, CameraComponent { fov: 90.0 });
     scene.register_camera(e);
+    let body = scene.entities_mut().gen_entity();
+    scene.entities_mut().add_component(
+        body,
+        TransformComponent::new_from_rot_trans(
+            glam::vec3(0.0, 0.0, 0.0),
+            glam::vec3(0.0, 0.0, 0.0),
+            false,
+        ),
+    );
+    scene.entities_mut().add_component(
+        body,
+        ModelComponent {
+            path: "./data/models/heroine.glb".to_string(),
+            shader_program: 0,
+        },
+    );
     /*scene.entities_mut().add_component(
         e,
         LightComponent::Spot {
@@ -81,6 +97,12 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
         scene.register_light(e);
     }
 
+    let parent = scene.entities_mut().gen_entity();
+    scene.entities_mut().add_component(
+        parent,
+        TransformComponent::new_from_rot_trans(glam::Vec3::ZERO, glam::Vec3::ZERO, false),
+    );
+    println!("parent id: {}", parent.id);
     let data = ["./data/models/heroine.glb"];
     let mut entities = vec![];
     for i in 0..10000 {
@@ -92,18 +114,20 @@ pub fn load_entities(scene: &mut GameState) -> Vec<Entity> {
                 shader_program: 0,
             },
         );
-        scene.entities_mut().add_component(
-            thing,
-            TransformComponent::new_from_rot_trans(
-                glam::Vec3::ZERO,
-                glam::vec3(
-                    (i % 25) as f32 * 1.0,
-                    ((i / 25) % 25) as f32 * 2.0,
-                    (i / 625) as f32 * 1.0,
-                ),
-                false,
+        let mut tc = TransformComponent::new_from_rot_trans(
+            glam::Vec3::ZERO,
+            glam::vec3(
+                (i % 25) as f32 * 1.0,
+                ((i / 25) % 25) as f32 * 2.0,
+                (i / 625) as f32 * 1.0,
             ),
+            false,
         );
+        if i < 100 {
+            tc.parent = Some(parent);
+            tc.depth = 1;
+        }
+        scene.entities_mut().add_component(thing, tc);
         entities.push(thing);
     }
     entities
@@ -124,4 +148,10 @@ pub fn load_entity_models(scene: &mut GameState, new_entities: &Vec<Entity>) {
     );
 }
 
-pub fn physics(game_state: &mut GameState, dt: f32, time: u128) {}
+pub fn physics(game_state: &mut GameState, dt: f32, time: u128) {
+    let transforms = &mut game_state
+        .entities_mut()
+        .get_component_vec_mut::<TransformComponent>();
+    let e = &mut transforms[32];
+    e.as_mut().unwrap().displace_by(glam::vec3(0.0, 0.0, 0.005));
+}

@@ -1,0 +1,23 @@
+   Compiling embryo v0.1.0 (/var/home/alexispurslane/Development/embryo-engine)
+error[E0308]: mismatched types
+   --> src/update_thread.rs:251:73
+    |
+251 |                     if let Some(tc) = &mut item.get_mut(0).and_then(|x| x) {
+    |                                                                         ^ expected `Option<_>`, found `&mut Option<TransformComponent>`
+    |
+    = note:           expected enum `std::option::Option<_>`
+            found mutable reference `&mut std::option::Option<TransformComponent>`
+help: try wrapping the expression in `Some`
+    |
+251 |                     if let Some(tc) = &mut item.get_mut(0).and_then(|x| Some(x)) {
+    |                                                                         +++++ +
+
+error[E0609]: no field `parent` on type `&mut _`
+   --> src/update_thread.rs:252:50
+    |
+252 |                         if let Some(parent) = tc.parent.and_then(|p_ref| {
+    |                                                  ^^^^^^ unknown field
+
+Some errors have detailed explanations: E0308, E0609.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `embryo` (bin "embryo") due to 2 previous errors
